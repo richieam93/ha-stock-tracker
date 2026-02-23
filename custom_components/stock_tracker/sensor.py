@@ -178,9 +178,9 @@ class StockPriceSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Return sensor name."""
-        company = self._safe_get("company_name", self._symbol)
-        return f"{company} ({self._symbol})"
+        """Kurzer Name = kurze entity_id."""
+        # Ergibt: sensor.aapl_price statt sensor.apple_inc_aapl_price
+        return f"{self._symbol} Price"
 
     @property
     def native_value(self) -> float | None:
@@ -338,7 +338,6 @@ class StockChangeSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Return sensor name."""
         return f"{self._symbol} Change"
 
     @property
@@ -443,7 +442,6 @@ class StockTrendSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Return sensor name."""
         return f"{self._symbol} Trend"
 
     @property
@@ -608,7 +606,6 @@ class StockVolumeSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Return sensor name."""
         return f"{self._symbol} Volume"
 
     @property
@@ -720,7 +717,6 @@ class StockIndicatorsSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Return sensor name."""
         return f"{self._symbol} Indicators"
 
     @property
