@@ -1133,7 +1133,7 @@ class StockTrackerCard extends HTMLElement {
 
 
 // =============================================================================
-// CARD EDITOR (für UI-Konfiguration)
+// CARD EDITOR MIT AUTO-DISCOVER
 // =============================================================================
 
 class StockTrackerCardEditor extends HTMLElement {
@@ -1141,6 +1141,7 @@ class StockTrackerCardEditor extends HTMLElement {
     super();
     this.attachShadow({ mode: 'open' });
     this._config = {};
+    this._hass = null;
   }
 
   setConfig(config) {
@@ -1150,79 +1151,196 @@ class StockTrackerCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._render();
+  }
+
+  _getStockEntities() {
+    /**
+     * Automatisch alle Stock Tracker Sensoren finden.
+     * Sucht nach sensor.*_price Entities die zur Integration gehören.
+     */
+    if (!this._hass) return [];
+
+    const entities = [];
+    const states = this._hass.states;
+
+    for (const entityId of Object.keys(states)) {
+      // Suche nach Preis-Sensoren
+      if (entityId.startsWith('sensor.') && entityId.endsWith('_price')) {
+        const state = states[entityId];
+        const attrs = state.attributes || {};
+
+        // Prüfe ob es ein Stock Tracker Sensor ist
+        const isStockSensor = (
+          attrs.symbol !== undefined ||
+          attrs.data_source !== undefined ||
+          attrs.change_percent !== undefined ||
+          attrs.market_cap !== undefined ||
+          attrs.pe_ratio !== undefined
+        );
+
+        if (isStockSensor) {
+          const symbol = attrs.symbol || entityId.replace('sensor.', '').replace('_price', '').toUpperCase();
+          const name = attrs.company_name || symbol;
+          const price = state.state;
+          const currency = attrs.currency || 'USD';
+          const change = attrs.change_percent;
+
+          let label = `${symbol} - ${name}`;
+          if (price && price !== 'unavailable') {
+            label += ` (${price} ${currency}`;
+            if (change !== undefined) {
+              const sign = change >= 0 ? '+' : '';
+              label += ` ${sign}${parseFloat(change).toFixed(2)}%`;
+            }
+            label += ')';
+          }
+
+          entities.push({
+            id: entityId,
+            symbol: symbol,
+            name: name,
+            label: label,
+          });
+        }
+      }
+    }
+
+    // Alphabetisch sortieren
+    entities.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    return entities;
   }
 
   _render() {
+    if (!this._hass) return;
+
+    const stockEntities = this._getStockEntities();
+    const currentEntity = this._config.entity || '';
+
+    // Options für Dropdown bauen
+    let optionsHtml = '<option value="">-- Aktie auswählen --</option>';
+    for (const entity of stockEntities) {
+      const selected = entity.id === currentEntity ? 'selected' : '';
+      optionsHtml += `<option value="${entity.id}" ${selected}>${entity.label}</option>`;
+    }
+
+    // Falls aktuelle Entity nicht in der Liste ist
+    if (currentEntity && !stockEntities.find(e => e.id === currentEntity)) {
+      optionsHtml += `<option value="${currentEntity}" selected>${currentEntity}</option>`;
+    }
+
     this.shadowRoot.innerHTML = `
       <style>
-        .card-config {
+        .editor {
           padding: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
         }
-        .config-row {
-          margin-bottom: 16px;
+        .field {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
         }
         label {
-          display: block;
-          margin-bottom: 4px;
           font-weight: 500;
-        }
-        input, select {
-          width: 100%;
-          padding: 8px;
-          border: 1px solid var(--divider-color);
-          border-radius: 4px;
-          background: var(--card-background-color);
+          font-size: 14px;
           color: var(--primary-text-color);
         }
-        .checkbox-row {
+        .hint {
+          font-size: 12px;
+          color: var(--secondary-text-color);
+        }
+        select, input {
+          width: 100%;
+          padding: 10px;
+          border: 1px solid var(--divider-color);
+          border-radius: 8px;
+          background: var(--card-background-color);
+          color: var(--primary-text-color);
+          font-size: 14px;
+        }
+        select:focus, input:focus {
+          outline: none;
+          border-color: var(--primary-color);
+        }
+        .checkbox-field {
           display: flex;
           align-items: center;
           gap: 8px;
         }
-        .checkbox-row input {
+        .checkbox-field input {
           width: auto;
         }
+        .info-box {
+          background: var(--secondary-background-color);
+          border-radius: 8px;
+          padding: 12px;
+          font-size: 12px;
+          color: var(--secondary-text-color);
+        }
+        .entity-count {
+          font-size: 12px;
+          color: var(--secondary-text-color);
+          margin-top: -8px;
+        }
       </style>
-      <div class="card-config">
-        <div class="config-row">
-          <label>Entity (Preis-Sensor)</label>
-          <input type="text" 
-                 id="entity" 
-                 value="${this._config.entity || ''}"
-                 placeholder="sensor.aapl_price">
+      
+      <div class="editor">
+        <div class="field">
+          <label>📊 Aktie auswählen</label>
+          <select id="entity">
+            ${optionsHtml}
+          </select>
+          <span class="entity-count">${stockEntities.length} Aktien verfügbar</span>
         </div>
-        <div class="config-row">
-          <label>Anzeige-Modus</label>
+
+        <div class="field">
+          <label>🎨 Anzeige-Modus</label>
           <select id="display_mode">
-            <option value="full" ${this._config.display_mode === 'full' ? 'selected' : ''}>Vollständig</option>
-            <option value="compact" ${this._config.display_mode === 'compact' ? 'selected' : ''}>Kompakt</option>
-            <option value="mini" ${this._config.display_mode === 'mini' ? 'selected' : ''}>Mini</option>
+            <option value="full" ${this._config.display_mode === 'full' ? 'selected' : ''}>
+              Vollständig (alle Details)
+            </option>
+            <option value="compact" ${this._config.display_mode === 'compact' ? 'selected' : ''}>
+              Kompakt (Kurs + Änderung)
+            </option>
+            <option value="mini" ${this._config.display_mode === 'mini' ? 'selected' : ''}>
+              Mini (nur eine Zeile)
+            </option>
           </select>
         </div>
-        <div class="config-row checkbox-row">
-          <input type="checkbox" 
-                 id="show_indicators" 
+
+        <div class="field checkbox-field">
+          <input type="checkbox"
+                 id="show_indicators"
                  ${this._config.show_indicators !== false ? 'checked' : ''}>
-          <label for="show_indicators">Technische Indikatoren anzeigen</label>
+          <label for="show_indicators">📈 Technische Indikatoren anzeigen</label>
         </div>
-        <div class="config-row checkbox-row">
-          <input type="checkbox" 
-                 id="show_chart" 
+
+        <div class="field checkbox-field">
+          <input type="checkbox"
+                 id="show_chart"
                  ${this._config.show_chart !== false ? 'checked' : ''}>
-          <label for="show_chart">Chart-Bereich anzeigen</label>
+          <label for="show_chart">📉 Chart-Bereich anzeigen</label>
         </div>
-        <div class="config-row">
+
+        <div class="field">
           <label>Eigener Name (optional)</label>
-          <input type="text" 
-                 id="name" 
+          <input type="text"
+                 id="name"
                  value="${this._config.name || ''}"
-                 placeholder="z.B. Apple Aktie">
+                 placeholder="z.B. Meine Apple Aktie">
+        </div>
+
+        <div class="info-box">
+          💡 <strong>Tipp:</strong> Füge weitere Aktien hinzu unter:<br>
+          Einstellungen → Geräte & Dienste → Stock Tracker → Konfigurieren
         </div>
       </div>
     `;
 
     // Event Listeners
-    this.shadowRoot.querySelectorAll('input, select').forEach(el => {
+    this.shadowRoot.querySelectorAll('select, input').forEach(el => {
       el.addEventListener('change', (e) => this._valueChanged(e));
     });
   }
@@ -1230,38 +1348,49 @@ class StockTrackerCardEditor extends HTMLElement {
   _valueChanged(e) {
     const target = e.target;
     let value = target.type === 'checkbox' ? target.checked : target.value;
-    
+
     const newConfig = { ...this._config };
     newConfig[target.id] = value;
-    
+
+    // Leere Werte entfernen
+    if (value === '' || value === false) {
+      if (target.id === 'name') delete newConfig.name;
+    }
+
     const event = new CustomEvent('config-changed', {
       detail: { config: newConfig },
       bubbles: true,
-      composed: true
+      composed: true,
     });
     this.dispatchEvent(event);
   }
 }
 
 
-// =============================================================================
-// REGISTER CARDS
-// =============================================================================
+// Auch getStubConfig aktualisieren
+// In der StockTrackerCard Klasse, ersetze getStubConfig:
 
-customElements.define('stock-tracker-card', StockTrackerCard);
-customElements.define('stock-tracker-card-editor', StockTrackerCardEditor);
-
-window.customCards = window.customCards || [];
-window.customCards.push({
-  type: 'stock-tracker-card',
-  name: 'Stock Tracker Card',
-  description: 'Display stock data with price, change, trend, and technical indicators',
-  preview: true,
-  documentationURL: 'https://github.com/your-repo/ha-stock-tracker'
-});
-
-console.info(
-  '%c STOCK-TRACKER-CARD %c v1.0.0 ',
-  'color: white; background: #3498db; font-weight: bold; padding: 2px 4px; border-radius: 2px 0 0 2px;',
-  'color: #3498db; background: white; font-weight: bold; padding: 2px 4px; border-radius: 0 2px 2px 0;'
-);
+StockTrackerCard.getStubConfig = function() {
+  // Versuche den ersten verfügbaren Stock-Sensor zu finden
+  const states = document.querySelector('home-assistant')
+    ?.__hass?.states || {};
+  
+  let defaultEntity = '';
+  
+  for (const entityId of Object.keys(states)) {
+    if (entityId.startsWith('sensor.') && entityId.endsWith('_price')) {
+      const attrs = states[entityId].attributes || {};
+      if (attrs.symbol || attrs.data_source || attrs.change_percent !== undefined) {
+        defaultEntity = entityId;
+        break;
+      }
+    }
+  }
+  
+  return {
+    entity: defaultEntity,
+    display_mode: 'compact',
+    show_chart: true,
+    show_indicators: true,
+  };
+};

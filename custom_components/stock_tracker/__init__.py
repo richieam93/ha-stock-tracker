@@ -14,14 +14,13 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import Platform, EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import HomeAssistant, ServiceCall, callback, Event
 from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
     DOMAIN,
-    PLATFORMS,
     CONF_SYMBOLS,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
@@ -35,14 +34,15 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+CARD_URL = "/local/community/stock-tracker/stock-tracker-card.js"
+
 
 # =============================================================================
 # SETUP
 # =============================================================================
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Set up the Stock Tracker component (legacy)."""
-    # Nur via Config Flow, kein YAML-Support
+    """Set up the Stock Tracker component."""
     return True
 
 
@@ -55,9 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_SYMBOLS, []),
     )
 
-    # -------------------------------------------------------------------------
     # Coordinator erstellen
-    # -------------------------------------------------------------------------
     from .coordinator import StockDataCoordinator
 
     symbols = entry.data.get(CONF_SYMBOLS, [])
@@ -69,53 +67,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         update_interval=scan_interval,
     )
 
-    # Erste Daten laden
     try:
         await coordinator.async_config_entry_first_refresh()
     except Exception as err:
         _LOGGER.error("Failed to fetch initial data: %s", err)
-        raise ConfigEntryNotReady(f"Could not connect to data source: {err}") from err
+        raise ConfigEntryNotReady(
+            f"Could not connect to data source: {err}"
+        ) from err
 
-    # Coordinator speichern
     hass.data[DOMAIN][entry.entry_id] = {
         "coordinator": coordinator,
         "symbols": list(symbols),
     }
 
-    # -------------------------------------------------------------------------
     # Sensor Platform laden
-    # -------------------------------------------------------------------------
     await hass.config_entries.async_forward_entry_setups(
         entry, [Platform.SENSOR]
     )
 
-    # -------------------------------------------------------------------------
-    # Update Listener (wenn User Symbole ändert)
-    # -------------------------------------------------------------------------
+    # Update Listener
     entry.async_on_unload(
         entry.add_update_listener(_async_update_listener)
     )
 
-    # -------------------------------------------------------------------------
     # Services registrieren (nur einmal)
-    # -------------------------------------------------------------------------
     if not hass.services.has_service(DOMAIN, SERVICE_ADD_STOCK):
         await _async_register_services(hass)
 
-    # -------------------------------------------------------------------------
-    # CUSTOM CARD AUTOMATISCH REGISTRIEREN
-    # -------------------------------------------------------------------------
-    await _async_register_custom_card(hass)
+    # Custom Card kopieren (in Executor)
+    await hass.async_add_executor_job(_copy_custom_card, hass)
 
-    # -------------------------------------------------------------------------
-    # DASHBOARD AUTOMATISCH ERSTELLEN (beim ersten Setup)
-    # -------------------------------------------------------------------------
-    await _async_create_default_dashboard(hass, entry)
+    # Auto-Register + Dashboard NACH dem Start
+    async def _setup_frontend(event: Event) -> None:
+        """Register card and dashboard after HA is fully started."""
+        await _async_register_lovelace_resource(hass)
+        await _async_create_dashboard(hass, entry)
+        await _async_show_welcome_notification(hass, entry)
 
-    # -------------------------------------------------------------------------
-    # Willkommens-Benachrichtigung (nur beim ersten Setup)
-    # -------------------------------------------------------------------------
-    await _async_show_welcome_notification(hass, entry)
+    # Prüfe ob HA schon gestartet ist
+    if hass.is_running:
+        await _async_register_lovelace_resource(hass)
+        await _async_create_dashboard(hass, entry)
+        await _async_show_welcome_notification(hass, entry)
+    else:
+        hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            _setup_frontend,
+        )
 
     _LOGGER.info("Stock Tracker setup complete with %d symbols", len(symbols))
     return True
@@ -132,7 +130,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
 
-    # Services entfernen wenn keine Einträge mehr
     if not hass.data.get(DOMAIN):
         for service in [
             SERVICE_ADD_STOCK,
@@ -150,71 +147,19 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> None:
-    """Handle config entry updates (symbol added/removed)."""
+    """Handle config entry updates."""
     _LOGGER.info("Config updated, reloading Stock Tracker")
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-
-
 # =============================================================================
-# CUSTOM CARD AUTO-REGISTRATION
+# CUSTOM CARD: KOPIEREN (Executor - Blocking OK)
 # =============================================================================
-
-async def _async_register_custom_card(hass: HomeAssistant) -> None:
-    """Automatically register the custom card as a Lovelace resource."""
-    try:
-        # Alles Blocking-I/O im Executor ausführen
-        result = await hass.async_add_executor_job(
-            _copy_custom_card,
-            hass,
-        )
-
-        if not result:
-            return
-
-        # Pfade für static path (non-blocking)
-        www_path = hass.config.path("www")
-        integration_path = os.path.join(www_path, "community", "stock-tracker")
-
-        # Als static path registrieren (non-blocking)
-        try:
-            hass.http.register_static_path(
-                "/hacsfiles/community/stock-tracker",
-                integration_path,
-                cache_headers=False,
-            )
-            _LOGGER.debug("Custom card registered as /hacsfiles/ path")
-        except Exception:
-            _LOGGER.debug("Static path already registered")
-
-        try:
-            hass.http.register_static_path(
-                "/local/community/stock-tracker",
-                integration_path,
-                cache_headers=False,
-            )
-            _LOGGER.debug("Custom card registered as /local/ path")
-        except Exception:
-            _LOGGER.debug("Static path /local/ already registered")
-
-    except Exception as err:
-        _LOGGER.error(
-            "Failed to register custom card: %s",
-            err,
-        )
-
 
 def _copy_custom_card(hass: HomeAssistant) -> bool:
-    """
-    Copy custom card files to www/community/ directory.
-    
-    This runs in the executor thread, so blocking I/O is OK.
-    Returns True if successful, False otherwise.
-    """
+    """Copy custom card files to www/community/ directory (runs in executor)."""
     import gzip
 
-    # Pfade definieren
     card_source = os.path.join(
         os.path.dirname(__file__),
         "www",
@@ -222,176 +167,264 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
     )
 
     www_path = hass.config.path("www")
-    integration_path = os.path.join(www_path, "community", "stock-tracker")
-    card_dest = os.path.join(integration_path, "stock-tracker-card.js")
-    card_dest_gz = os.path.join(integration_path, "stock-tracker-card.js.gz")
+    target_dir = os.path.join(www_path, "community", "stock-tracker")
+    card_dest = os.path.join(target_dir, "stock-tracker-card.js")
+    card_dest_gz = os.path.join(target_dir, "stock-tracker-card.js.gz")
 
-    # Prüfe ob Quelldatei existiert
     if not os.path.exists(card_source):
-        _LOGGER.warning(
-            "Custom card source not found at %s",
-            card_source,
-        )
+        _LOGGER.warning("Card source not found: %s", card_source)
         return False
 
-    # Zielordner erstellen
-    os.makedirs(integration_path, exist_ok=True)
+    os.makedirs(target_dir, exist_ok=True)
 
-    # Prüfen ob Kopieren nötig ist
-    should_copy = False
-
-    if not os.path.exists(card_dest):
-        should_copy = True
-    else:
-        source_mtime = os.path.getmtime(card_source)
-        dest_mtime = os.path.getmtime(card_dest)
-        if source_mtime > dest_mtime:
+    # Prüfen ob Kopieren nötig
+    should_copy = not os.path.exists(card_dest)
+    if not should_copy:
+        if os.path.getmtime(card_source) > os.path.getmtime(card_dest):
             should_copy = True
 
     if not should_copy:
-        _LOGGER.debug("Custom card already up to date")
+        _LOGGER.debug("Card already up to date")
         return True
 
-    # Datei kopieren
+    # Kopieren
     try:
         shutil.copy2(card_source, card_dest)
-        _LOGGER.info("Custom card copied to %s", card_dest)
+        _LOGGER.info("Card copied to %s", card_dest)
     except Exception as err:
         _LOGGER.error("Failed to copy card: %s", err)
         return False
 
-    # .gz Version erstellen
+    # .gz erstellen
     try:
         with open(card_dest, "rb") as f_in:
             with gzip.open(card_dest_gz, "wb", compresslevel=9) as f_out:
                 shutil.copyfileobj(f_in, f_out)
-
-        original_size = os.path.getsize(card_dest)
-        compressed_size = os.path.getsize(card_dest_gz)
-        ratio = (1 - compressed_size / original_size) * 100
-
-        _LOGGER.info(
-            "Card compressed: %d → %d bytes (%.0f%% smaller)",
-            original_size,
-            compressed_size,
-            ratio,
-        )
+        _LOGGER.info("Card .gz created")
     except Exception as err:
-        _LOGGER.warning("Could not create .gz file: %s", err)
+        _LOGGER.warning("Could not create .gz: %s", err)
 
     return True
 
+
 # =============================================================================
-# DASHBOARD AUTO-CREATION
+# LOVELACE RESOURCE AUTO-REGISTRIEREN
 # =============================================================================
 
-async def _async_create_default_dashboard(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-) -> None:
-    """Create a default Stock Tracker dashboard on first setup."""
-    # Prüfen ob Dashboard schon erstellt wurde
-    dashboard_created_key = "dashboard_created"
-    
-    if entry.data.get(dashboard_created_key):
-        _LOGGER.debug("Dashboard already created, skipping")
-        return
-
+async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
+    """Automatically register the custom card as Lovelace resource."""
     try:
-        symbols = entry.data.get(CONF_SYMBOLS, [])
-        
-        if not symbols:
-            _LOGGER.debug("No symbols configured, skipping dashboard creation")
+        # Prüfe ob Lovelace verfügbar ist
+        if "lovelace" not in hass.data:
+            _LOGGER.debug("Lovelace not available yet")
             return
 
-        from .dashboard import DashboardGenerator
-        generator = DashboardGenerator(hass)
-        
-        coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-        dashboard_config = generator.generate_dashboard(
-            symbols,
-            coordinator_data=coordinator.data,
+        lovelace = hass.data["lovelace"]
+        resources = lovelace.get("resources")
+
+        if resources is None:
+            _LOGGER.debug("Lovelace resources not available")
+            return
+
+        # Prüfe ob schon registriert
+        existing_urls = [
+            r.get("url", "") for r in resources.async_items()
+        ]
+
+        if CARD_URL in existing_urls:
+            _LOGGER.debug("Card resource already registered")
+            return
+
+        # Auch alternative URLs prüfen
+        alt_urls = [
+            "/hacsfiles/community/stock-tracker/stock-tracker-card.js",
+            "/local/stock-tracker-card.js",
+        ]
+        for alt_url in alt_urls:
+            if alt_url in existing_urls:
+                _LOGGER.debug("Card already registered under %s", alt_url)
+                return
+
+        # Resource registrieren
+        await resources.async_create_item({
+            "res_type": "module",
+            "url": CARD_URL,
+        })
+
+        _LOGGER.info(
+            "✅ Custom card auto-registered as Lovelace resource: %s",
+            CARD_URL,
         )
-        
-        # Dashboard in Executor speichern (async-safe)
-        await hass.async_add_executor_job(
-            _save_dashboard_yaml,
-            hass,
-            dashboard_config,
-        )
-        
-        _LOGGER.info("Dashboard YAML created successfully")
-        
-        # Merken dass Dashboard erstellt wurde
-        new_data = dict(entry.data)
-        new_data[dashboard_created_key] = True
-        hass.config_entries.async_update_entry(entry, data=new_data)
 
     except Exception as err:
         _LOGGER.warning(
-            "Could not create dashboard automatically: %s",
-            err
+            "Could not auto-register Lovelace resource: %s", err
         )
 
 
-def _save_dashboard_yaml(
+# =============================================================================
+# DASHBOARD AUTO-ERSTELLEN (mit Sidebar-Link)
+# =============================================================================
+
+async def _async_create_dashboard(
     hass: HomeAssistant,
-    dashboard_config: dict,
+    entry: ConfigEntry,
 ) -> None:
-    """
-    Save dashboard YAML file (runs in executor, blocking is OK).
-    
-    This function runs in a thread pool, so blocking I/O is allowed.
-    """
-    import yaml
-    
-    dashboards_dir = hass.config.path("dashboards")
-    os.makedirs(dashboards_dir, exist_ok=True)
-    
-    dashboard_file = os.path.join(dashboards_dir, "stock_tracker_auto.yaml")
-    
-    # Jetzt ist blocking I/O OK, da wir im Executor laufen
-    with open(dashboard_file, "w", encoding="utf-8") as f:
-        yaml.dump(
-            dashboard_config,
-            f,
-            default_flow_style=False,
-            allow_unicode=True,
-            sort_keys=False,
-        )
-    
-    _LOGGER.debug("Dashboard YAML saved to %s", dashboard_file)
+    """Create Stock Tracker dashboard in sidebar."""
+    dashboard_key = "dashboard_created"
 
+    if entry.data.get(dashboard_key):
+        return
 
-def _create_gzip_file(source_file: str, dest_file: str) -> None:
-    """
-    Create a gzipped version of the JS file.
-    
-    This is what HACS does automatically. We replicate it here
-    so the card works the same way as HACS-installed cards.
-    
-    This function runs in executor, so blocking I/O is allowed.
-    """
-    import gzip
-    
     try:
-        with open(source_file, "rb") as f_in:
-            with gzip.open(dest_file, "wb", compresslevel=9) as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        
-        # Dateigröße loggen
-        original_size = os.path.getsize(source_file)
-        compressed_size = os.path.getsize(dest_file)
-        compression_ratio = (1 - compressed_size / original_size) * 100
-        
-        _LOGGER.debug(
-            "Card compressed: %d bytes → %d bytes (%.1f%% smaller)",
-            original_size,
-            compressed_size,
-            compression_ratio
-        )
+        if "lovelace" not in hass.data:
+            _LOGGER.debug("Lovelace not available for dashboard creation")
+            return
+
+        lovelace = hass.data["lovelace"]
+        dashboards = lovelace.get("dashboards")
+
+        if dashboards is None:
+            _LOGGER.debug("Lovelace dashboards not available")
+            return
+
+        # Prüfe ob Dashboard schon existiert
+        existing_paths = [
+            d.get("url_path", "") for d in dashboards.async_items()
+        ]
+
+        if "stock-tracker" in existing_paths:
+            _LOGGER.debug("Dashboard already exists")
+            # Trotzdem als erstellt markieren
+            new_data = dict(entry.data)
+            new_data[dashboard_key] = True
+            hass.config_entries.async_update_entry(entry, data=new_data)
+            return
+
+        # Dashboard in Sidebar erstellen
+        await dashboards.async_create_item({
+            "url_path": "stock-tracker",
+            "mode": "storage",
+            "title": "📊 Aktien",
+            "icon": "mdi:chart-line",
+            "show_in_sidebar": True,
+            "require_admin": False,
+        })
+
+        _LOGGER.info("✅ Dashboard 'Stock Tracker' created in sidebar")
+
+        # Dashboard mit Cards befüllen
+        await _async_populate_dashboard(hass, entry)
+
+        # Als erstellt markieren
+        new_data = dict(entry.data)
+        new_data[dashboard_key] = True
+        hass.config_entries.async_update_entry(entry, data=new_data)
+
     except Exception as err:
-        _LOGGER.warning("Could not create .gz file: %s", err)
+        _LOGGER.warning("Could not create dashboard: %s", err)
+
+
+async def _async_populate_dashboard(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> None:
+    """Populate the dashboard with stock cards."""
+    try:
+        symbols = entry.data.get(CONF_SYMBOLS, [])
+
+        if not symbols:
+            return
+
+        # Dashboard Config bauen
+        cards = []
+
+        # Header
+        cards.append({
+            "type": "markdown",
+            "content": "# 📊 Stock Tracker\n"
+                       "Aktualisierung: "
+                       "{{ now().strftime('%H:%M:%S') }}",
+        })
+
+        # Stock Cards
+        stock_cards = []
+        for symbol in symbols:
+            sensor_name = _symbol_to_entity(symbol)
+            stock_cards.append({
+                "type": "custom:stock-tracker-card",
+                "entity": f"sensor.{sensor_name}_price",
+                "display_mode": "compact",
+            })
+
+        if stock_cards:
+            cards.append({
+                "type": "grid",
+                "columns": 2,
+                "square": False,
+                "cards": stock_cards,
+            })
+
+        # Entities Card als Fallback
+        entity_list = []
+        for symbol in symbols:
+            sensor_name = _symbol_to_entity(symbol)
+            entity_list.append(f"sensor.{sensor_name}_price")
+            entity_list.append(f"sensor.{sensor_name}_change")
+
+        cards.append({
+            "type": "entities",
+            "title": "📈 Alle Kurse",
+            "entities": entity_list,
+        })
+
+        # History Graph
+        history_entities = []
+        for symbol in symbols[:5]:
+            sensor_name = _symbol_to_entity(symbol)
+            history_entities.append({
+                "entity": f"sensor.{sensor_name}_price",
+                "name": symbol,
+            })
+
+        if history_entities:
+            cards.append({
+                "type": "history-graph",
+                "title": "📉 Kursverlauf",
+                "hours_to_show": 24,
+                "entities": history_entities,
+            })
+
+        # Config speichern
+        dashboard_config = {
+            "views": [
+                {
+                    "title": "Übersicht",
+                    "path": "default_view",
+                    "cards": cards,
+                }
+            ],
+        }
+
+        # Über Lovelace-Storage speichern
+        from homeassistant.components.lovelace import dashboard as ll_dashboard
+
+        # Finde das richtige Dashboard-Objekt
+        lovelace = hass.data["lovelace"]
+        
+        # Dashboard Config speichern über WebSocket-kompatible Methode
+        config_key = f"lovelace.stock-tracker"
+        
+        from homeassistant.helpers.storage import Store
+        
+        store = Store(hass, 1, config_key)
+        await store.async_save({"data": dashboard_config})
+
+        _LOGGER.info("Dashboard populated with %d symbols", len(symbols))
+
+    except Exception as err:
+        _LOGGER.warning("Could not populate dashboard: %s", err)
+
 
 # =============================================================================
 # WELCOME NOTIFICATION
@@ -401,64 +434,36 @@ async def _async_show_welcome_notification(
     hass: HomeAssistant,
     entry: ConfigEntry,
 ) -> None:
-    """Show a welcome notification on first setup."""
-    # Nur beim ersten Setup zeigen
-    welcome_shown_key = "welcome_shown"
-    
-    if entry.data.get(welcome_shown_key):
+    """Show welcome notification on first setup."""
+    welcome_key = "welcome_shown"
+
+    if entry.data.get(welcome_key):
         return
 
     try:
         symbols = entry.data.get(CONF_SYMBOLS, [])
         symbol_count = len(symbols)
-        
-        # Erstes Symbol für Beispiel
-        first_symbol = symbols[0] if symbols else "AAPL"
-        first_symbol_entity = first_symbol.lower().replace(".", "_").replace("-", "_")
-
-        # Erstelle Benachrichtigung
-        title = "🎉 Stock Tracker eingerichtet!"
-        
-        # Normale String-Formatierung ohne f-string wegen YAML-Code
         symbols_list = ", ".join(symbols)
         sensor_count = symbol_count * 5
-        
-        message = f"""**Willkommen bei Stock Tracker!**
+        first_entity = _symbol_to_entity(symbols[0]) if symbols else "aapl"
 
-✅ **{symbol_count} Symbol{"e" if symbol_count != 1 else ""} werden überwacht:**
-{symbols_list}
+        title = "🎉 Stock Tracker eingerichtet!"
 
-📊 **Was wurde erstellt:**
-- {sensor_count} Sensoren (5 pro Aktie)
-- Custom Card für Lovelace
-- Dashboard "Stock Tracker"
-
-🚀 **Nächste Schritte:**
-
-1. **Dashboard öffnen:** 
-   Die Datei wurde gespeichert unter:
-   /config/dashboards/stock_tracker_auto.yaml
-
-2. **Custom Card nutzen:**
-   Füge dies zu deinem Dashboard hinzu:
-   
-   type: custom:stock-tracker-card
-   entity: sensor.{first_symbol_entity}_price
-   display_mode: full
-
-3. **Weitere Aktien hinzufügen:**
-   Einstellungen → Geräte & Dienste → Stock Tracker → Optionen
-
-⚠️ **Hinweis - Custom Card Ressource:**
-Falls die Card nicht automatisch funktioniert, registriere sie manuell:
-
-Einstellungen → Dashboards → Ressourcen → Ressource hinzufügen
-URL: `/hacsfiles/community/stock-tracker/stock-tracker-card.js`
-Typ: JavaScript-Modul
-
-💡 **Tipp:** 
-Nutze den Service `stock_tracker.search` um neue Aktien zu finden!
-"""
+        message = (
+            "**Willkommen bei Stock Tracker!**\n\n"
+            f"✅ **{symbol_count} Symbole werden überwacht:**\n"
+            f"{symbols_list}\n\n"
+            f"📊 **{sensor_count} Sensoren erstellt** (5 pro Aktie)\n\n"
+            "🎨 **Custom Card** automatisch registriert\n\n"
+            "📋 **Dashboard** in der Seitenleiste unter '📊 Aktien'\n\n"
+            "🚀 **Card in beliebigem Dashboard nutzen:**\n"
+            "```\n"
+            "type: custom:stock-tracker-card\n"
+            f"entity: sensor.{first_entity}_price\n"
+            "```\n\n"
+            "💡 Weitere Aktien: Einstellungen → Geräte & Dienste → "
+            "Stock Tracker → Konfigurieren"
+        )
 
         await hass.services.async_call(
             "persistent_notification",
@@ -470,15 +475,12 @@ Nutze den Service `stock_tracker.search` um neue Aktien zu finden!
             },
         )
 
-        # Merken dass Benachrichtigung gezeigt wurde
         new_data = dict(entry.data)
-        new_data[welcome_shown_key] = True
+        new_data[welcome_key] = True
         hass.config_entries.async_update_entry(entry, data=new_data)
 
-        _LOGGER.info("Welcome notification shown")
-
     except Exception as err:
-        _LOGGER.debug("Could not show welcome notification: %s", err)
+        _LOGGER.debug("Could not show welcome: %s", err)
 
 
 # =============================================================================
@@ -488,153 +490,97 @@ Nutze den Service `stock_tracker.search` um neue Aktien zu finden!
 async def _async_register_services(hass: HomeAssistant) -> None:
     """Register Stock Tracker services."""
 
-    # Service: stock_tracker.add_stock
     async def async_handle_add_stock(call: ServiceCall) -> None:
-        """Add a stock symbol to tracking."""
+        """Add a stock symbol."""
         symbol = call.data["symbol"].upper().strip()
-
-        _LOGGER.info("Service call: Adding stock %s", symbol)
-
         entry = _get_config_entry(hass)
         if not entry:
             raise HomeAssistantError("Stock Tracker is not configured")
 
-        current_symbols = list(entry.data.get(CONF_SYMBOLS, []))
-        if len(current_symbols) >= MAX_SYMBOLS:
-            raise HomeAssistantError(
-                f"Maximum of {MAX_SYMBOLS} symbols reached"
-            )
-
-        if symbol in current_symbols:
-            _LOGGER.warning("Symbol %s is already being tracked", symbol)
+        current = list(entry.data.get(CONF_SYMBOLS, []))
+        if len(current) >= MAX_SYMBOLS:
+            raise HomeAssistantError(f"Maximum {MAX_SYMBOLS} symbols")
+        if symbol in current:
             return
 
         from .coordinator import StockDataCoordinator
-
-        is_valid = await hass.async_add_executor_job(
+        valid = await hass.async_add_executor_job(
             StockDataCoordinator.validate_symbol, symbol
         )
-        if not is_valid:
-            raise HomeAssistantError(
-                f"Symbol '{symbol}' not found on any data source"
-            )
+        if not valid:
+            raise HomeAssistantError(f"Symbol '{symbol}' not found")
 
-        updated_symbols = current_symbols + [symbol]
+        updated = current + [symbol]
         new_data = dict(entry.data)
-        new_data[CONF_SYMBOLS] = updated_symbols
-
+        new_data[CONF_SYMBOLS] = updated
         hass.config_entries.async_update_entry(entry, data=new_data)
-        
+
         await hass.services.async_call(
-            "persistent_notification",
-            "create",
+            "persistent_notification", "create",
             {
                 "title": f"✅ {symbol} hinzugefügt",
-                "message": f"Die Aktie **{symbol}** wird jetzt überwacht.\n\n5 neue Sensoren wurden erstellt.",
+                "message": f"**{symbol}** wird jetzt überwacht.",
                 "notification_id": f"{DOMAIN}_added_{symbol.lower()}",
             },
         )
-        
-        _LOGGER.info(
-            "Successfully added %s. Total symbols: %d",
-            symbol,
-            len(updated_symbols)
-        )
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_ADD_STOCK,
-        async_handle_add_stock,
-        schema=vol.Schema({
-            vol.Required("symbol"): cv.string,
-        }),
+        DOMAIN, SERVICE_ADD_STOCK, async_handle_add_stock,
+        schema=vol.Schema({vol.Required("symbol"): cv.string}),
     )
 
-    # Service: stock_tracker.remove_stock
     async def async_handle_remove_stock(call: ServiceCall) -> None:
-        """Remove a stock symbol from tracking."""
+        """Remove a stock symbol."""
         symbol = call.data["symbol"].upper().strip()
-
-        _LOGGER.info("Service call: Removing stock %s", symbol)
-
         entry = _get_config_entry(hass)
         if not entry:
-            raise HomeAssistantError("Stock Tracker is not configured")
+            raise HomeAssistantError("Not configured")
 
-        current_symbols = list(entry.data.get(CONF_SYMBOLS, []))
-
-        if symbol not in current_symbols:
-            raise HomeAssistantError(f"Symbol '{symbol}' is not being tracked")
-
-        if len(current_symbols) <= 1:
+        current = list(entry.data.get(CONF_SYMBOLS, []))
+        if symbol not in current:
+            raise HomeAssistantError(f"'{symbol}' not tracked")
+        if len(current) <= 1:
             raise HomeAssistantError("Cannot remove last symbol")
 
-        updated_symbols = [s for s in current_symbols if s != symbol]
+        updated = [s for s in current if s != symbol]
         new_data = dict(entry.data)
-        new_data[CONF_SYMBOLS] = updated_symbols
-
+        new_data[CONF_SYMBOLS] = updated
         hass.config_entries.async_update_entry(entry, data=new_data)
-        
-        _LOGGER.info(
-            "Successfully removed %s. Remaining: %d",
-            symbol,
-            len(updated_symbols)
-        )
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_REMOVE_STOCK,
-        async_handle_remove_stock,
-        schema=vol.Schema({
-            vol.Required("symbol"): cv.string,
-        }),
+        DOMAIN, SERVICE_REMOVE_STOCK, async_handle_remove_stock,
+        schema=vol.Schema({vol.Required("symbol"): cv.string}),
     )
 
-    # Service: stock_tracker.search
-    async def async_handle_search(call: ServiceCall) -> dict:
-        """Search for stock symbols."""
+    async def async_handle_search(call: ServiceCall) -> None:
+        """Search for symbols."""
         query = call.data["query"].strip()
         limit = call.data.get("limit", 10)
 
-        _LOGGER.info("Service call: Searching for '%s'", query)
-
         from .coordinator import StockDataCoordinator
-
         results = await hass.async_add_executor_job(
             StockDataCoordinator.search_symbols, query, limit
         )
 
         if results:
-            result_text = "\n".join(
-                f"**{r['symbol']}** - {r['name']} ({r.get('exchange', 'N/A')})"
+            text = "\n".join(
+                f"**{r['symbol']}** - {r['name']} ({r.get('exchange', '')})"
                 for r in results
             )
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": f"🔍 Suchergebnisse für '{query}'",
-                    "message": result_text,
-                    "notification_id": f"{DOMAIN}_search_results",
-                },
-            )
         else:
-            await hass.services.async_call(
-                "persistent_notification",
-                "create",
-                {
-                    "title": f"🔍 Suchergebnisse für '{query}'",
-                    "message": "Keine Ergebnisse gefunden.",
-                    "notification_id": f"{DOMAIN}_search_results",
-                },
-            )
+            text = "Keine Ergebnisse."
 
-        return {"results": results}
+        await hass.services.async_call(
+            "persistent_notification", "create",
+            {
+                "title": f"🔍 Suche: '{query}'",
+                "message": text,
+                "notification_id": f"{DOMAIN}_search",
+            },
+        )
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_SEARCH,
-        async_handle_search,
+        DOMAIN, SERVICE_SEARCH, async_handle_search,
         schema=vol.Schema({
             vol.Required("query"): cv.string,
             vol.Optional("limit", default=10): vol.All(
@@ -643,54 +589,41 @@ async def _async_register_services(hass: HomeAssistant) -> None:
         }),
     )
 
-    # Service: stock_tracker.refresh
     async def async_handle_refresh(call: ServiceCall) -> None:
-        """Force refresh all stock data."""
-        _LOGGER.info("Service call: Force refresh")
-
+        """Force refresh."""
         for entry_data in hass.data.get(DOMAIN, {}).values():
             coordinator = entry_data.get("coordinator")
             if coordinator:
                 await coordinator.async_request_refresh()
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_REFRESH,
-        async_handle_refresh,
+        DOMAIN, SERVICE_REFRESH, async_handle_refresh,
         schema=vol.Schema({}),
     )
 
-    # Service: stock_tracker.update_database
     async def async_handle_update_db(call: ServiceCall) -> None:
-        """Update the symbol database."""
-        _LOGGER.info("Service call: Update symbol database")
-
+        """Update symbol database."""
         try:
             from .symbol_db import SymbolDatabase
-
             db = SymbolDatabase(hass)
             count = await hass.async_add_executor_job(db.update)
-
             await hass.services.async_call(
-                "persistent_notification",
-                "create",
+                "persistent_notification", "create",
                 {
-                    "title": "📊 Symbol-Datenbank aktualisiert",
-                    "message": f"Es wurden {count} Symbole aktualisiert.",
-                    "notification_id": f"{DOMAIN}_db_update",
+                    "title": "📊 DB aktualisiert",
+                    "message": f"{count} Symbole.",
+                    "notification_id": f"{DOMAIN}_db",
                 },
             )
         except Exception as err:
-            raise HomeAssistantError(f"Database update failed: {err}") from err
+            raise HomeAssistantError(f"DB update failed: {err}") from err
 
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_UPDATE_DB,
-        async_handle_update_db,
+        DOMAIN, SERVICE_UPDATE_DB, async_handle_update_db,
         schema=vol.Schema({}),
     )
 
-    _LOGGER.info("Stock Tracker services registered")
+    _LOGGER.info("Services registered")
 
 
 # =============================================================================
@@ -699,6 +632,17 @@ async def _async_register_services(hass: HomeAssistant) -> None:
 
 @callback
 def _get_config_entry(hass: HomeAssistant) -> ConfigEntry | None:
-    """Get the first (and usually only) config entry for Stock Tracker."""
+    """Get config entry."""
     entries = hass.config_entries.async_entries(DOMAIN)
     return entries[0] if entries else None
+
+
+def _symbol_to_entity(symbol: str) -> str:
+    """Convert symbol to entity name part."""
+    return (
+        symbol.lower()
+        .replace(".", "_")
+        .replace("-", "_")
+        .replace("^", "")
+        .replace("=", "_")
+    )

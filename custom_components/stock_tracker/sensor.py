@@ -97,7 +97,9 @@ async def async_setup_entry(
 class StockBaseSensor(CoordinatorEntity, SensorEntity):
     """Base class for all stock sensors."""
 
-    _attr_has_entity_name = True
+    # WICHTIG: False = Name wird DIREKT als entity_id verwendet
+    # True = Name wird an Device-Name angehängt (doppelt!)
+    _attr_has_entity_name = False
 
     def __init__(
         self,
@@ -109,38 +111,48 @@ class StockBaseSensor(CoordinatorEntity, SensorEntity):
         super().__init__(coordinator)
         self._symbol = symbol.upper()
         self._sensor_type = sensor_type
-        self._attr_unique_id = (
-            f"stock_tracker_{self._symbol.lower()}_{sensor_type}"
+        
+        # Saubere Entity-ID: sensor.aapl_price, sensor.btc_usd_change
+        clean_symbol = self._clean_symbol(symbol)
+        self._attr_unique_id = f"{DOMAIN}_{clean_symbol}_{sensor_type}"
+
+    @staticmethod
+    def _clean_symbol(symbol: str) -> str:
+        """Convert symbol to clean entity name."""
+        return (
+            symbol.lower()
+            .replace(".", "_")
+            .replace("-", "_")
+            .replace("^", "")
+            .replace("=", "_")
+            .replace(" ", "_")
         )
 
     @property
     def device_info(self):
-        """Return device info - groups all sensors for one stock."""
+        """Return device info."""
         data = self._get_data()
         company = data.get("company_name", self._symbol) if data else self._symbol
-        exchange = data.get("exchange", "N/A") if data else "N/A"
 
         return {
             "identifiers": {(DOMAIN, self._symbol)},
-            "name": f"{company} ({self._symbol})",
+            "name": f"{self._symbol} ({company})",
             "manufacturer": "Stock Tracker",
-            "model": f"Stock · {exchange}",
-            "sw_version": data.get("data_source", "unknown") if data else "unknown",
+            "model": "Stock Sensor",
         }
 
     def _get_data(self) -> dict[str, Any] | None:
-        """Get data for this symbol from coordinator."""
+        """Get data for this symbol."""
         if self.coordinator.data:
             return self.coordinator.data.get(self._symbol)
         return None
 
     def _safe_get(self, key: str, default=None):
-        """Safely get a value from data."""
+        """Safely get a value."""
         data = self._get_data()
         if data:
             return data.get(key, default)
         return default
-
 
 # =============================================================================
 # SENSOR 1: STOCK PRICE (Hauptsensor)
