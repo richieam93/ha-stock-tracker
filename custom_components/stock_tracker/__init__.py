@@ -206,7 +206,6 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
 
     return True
 
-
 # =============================================================================
 # LOVELACE RESOURCE AUTO-REGISTRIEREN
 # =============================================================================
@@ -214,13 +213,14 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
     """Automatically register the custom card as Lovelace resource."""
     try:
-        # Prüfe ob Lovelace verfügbar ist
         if "lovelace" not in hass.data:
             _LOGGER.debug("Lovelace not available yet")
             return
 
         lovelace = hass.data["lovelace"]
-        resources = lovelace.get("resources")
+
+        # NEU: Direkter Attribut-Zugriff statt .get()
+        resources = getattr(lovelace, "resources", None)
 
         if resources is None:
             _LOGGER.debug("Lovelace resources not available")
@@ -235,7 +235,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
             _LOGGER.debug("Card resource already registered")
             return
 
-        # Auch alternative URLs prüfen
+        # Alternative URLs prüfen
         alt_urls = [
             "/hacsfiles/community/stock-tracker/stock-tracker-card.js",
             "/local/stock-tracker-card.js",
@@ -252,7 +252,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         })
 
         _LOGGER.info(
-            "✅ Custom card auto-registered as Lovelace resource: %s",
+            "✅ Custom card auto-registered: %s",
             CARD_URL,
         )
 
@@ -260,7 +260,6 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         _LOGGER.warning(
             "Could not auto-register Lovelace resource: %s", err
         )
-
 
 # =============================================================================
 # DASHBOARD AUTO-ERSTELLEN (mit Sidebar-Link)
@@ -282,7 +281,9 @@ async def _async_create_dashboard(
             return
 
         lovelace = hass.data["lovelace"]
-        dashboards = lovelace.get("dashboards")
+
+        # NEU: Direkter Attribut-Zugriff statt .get()
+        dashboards = getattr(lovelace, "dashboards", None)
 
         if dashboards is None:
             _LOGGER.debug("Lovelace dashboards not available")
@@ -295,7 +296,6 @@ async def _async_create_dashboard(
 
         if "stock-tracker" in existing_paths:
             _LOGGER.debug("Dashboard already exists")
-            # Trotzdem als erstellt markieren
             new_data = dict(entry.data)
             new_data[dashboard_key] = True
             hass.config_entries.async_update_entry(entry, data=new_data)
