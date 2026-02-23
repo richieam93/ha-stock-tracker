@@ -155,124 +155,131 @@ async def _async_update_listener(
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+
+
 # =============================================================================
 # CUSTOM CARD AUTO-REGISTRATION
 # =============================================================================
 
 async def _async_register_custom_card(hass: HomeAssistant) -> None:
-    """
-    Automatically register the custom card as a Lovelace resource.
-    
-    Follows HACS convention:
-    - Copy to /www/community/stock-tracker/
-    - Create .gz version
-    - Register as /hacsfiles/community/stock-tracker/stock-tracker-card.js
-    """
+    """Automatically register the custom card as a Lovelace resource."""
     try:
-        # Pfade definieren (HACS-konform)
-        www_path = hass.config.path("www")
-        community_path = os.path.join(www_path, "community")
-        integration_path = os.path.join(community_path, "stock-tracker")
-        
-        card_source = os.path.join(
-            os.path.dirname(__file__),
-            "www",
-            "stock-tracker-card.js"
+        # Alles Blocking-I/O im Executor ausführen
+        result = await hass.async_add_executor_job(
+            _copy_custom_card,
+            hass,
         )
-        card_dest = os.path.join(integration_path, "stock-tracker-card.js")
-        card_dest_gz = f"{card_dest}.gz"
 
-        # Ordner erstellen
-        os.makedirs(integration_path, exist_ok=True)
-
-        # Card kopieren (nur wenn Quelle neuer ist oder Ziel nicht existiert)
-        if os.path.exists(card_source):
-            should_copy = False
-            
-            if not os.path.exists(card_dest):
-                should_copy = True
-            else:
-                # Prüfen ob Source neuer ist
-                source_mtime = os.path.getmtime(card_source)
-                dest_mtime = os.path.getmtime(card_dest)
-                if source_mtime > dest_mtime:
-                    should_copy = True
-            
-            if should_copy:
-                # Original kopieren
-                shutil.copy2(card_source, card_dest)
-                _LOGGER.info(
-                    "Custom card copied to %s",
-                    card_dest
-                )
-                
-                # .gz Version erstellen
-                await hass.async_add_executor_job(
-                    _create_gzip_file,
-                    card_dest,
-                    card_dest_gz
-                )
-                _LOGGER.info("Custom card .gz version created")
-            else:
-                _LOGGER.debug("Custom card already up to date")
-        else:
-            _LOGGER.warning(
-                "Custom card source not found at %s",
-                card_source
-            )
+        if not result:
             return
 
-        # Als static path registrieren (HACS-Pfad)
-        # HACS verwendet /hacsfiles/ statt /local/
-        hass.http.register_static_path(
-            "/hacsfiles/community/stock-tracker",
-            integration_path,
-            cache_headers=False
-        )
-        _LOGGER.debug("Custom card registered as /hacsfiles/ path")
-        
-        # Auch als /local/ registrieren (Fallback)
-        hass.http.register_static_path(
-            "/local/community/stock-tracker",
-            integration_path,
-            cache_headers=False
-        )
-        _LOGGER.debug("Custom card registered as /local/ path")
+        # Pfade für static path (non-blocking)
+        www_path = hass.config.path("www")
+        integration_path = os.path.join(www_path, "community", "stock-tracker")
+
+        # Als static path registrieren (non-blocking)
+        try:
+            hass.http.register_static_path(
+                "/hacsfiles/community/stock-tracker",
+                integration_path,
+                cache_headers=False,
+            )
+            _LOGGER.debug("Custom card registered as /hacsfiles/ path")
+        except Exception:
+            _LOGGER.debug("Static path already registered")
+
+        try:
+            hass.http.register_static_path(
+                "/local/community/stock-tracker",
+                integration_path,
+                cache_headers=False,
+            )
+            _LOGGER.debug("Custom card registered as /local/ path")
+        except Exception:
+            _LOGGER.debug("Static path /local/ already registered")
 
     except Exception as err:
         _LOGGER.error(
-            "Failed to register custom card automatically: %s",
-            err
+            "Failed to register custom card: %s",
+            err,
         )
 
 
-def _create_gzip_file(source_file: str, dest_file: str) -> None:
+def _copy_custom_card(hass: HomeAssistant) -> bool:
     """
-    Create a gzipped version of the JS file.
+    Copy custom card files to www/community/ directory.
     
-    This is what HACS does automatically. We replicate it here
-    so the card works the same way as HACS-installed cards.
+    This runs in the executor thread, so blocking I/O is OK.
+    Returns True if successful, False otherwise.
     """
     import gzip
-    
+
+    # Pfade definieren
+    card_source = os.path.join(
+        os.path.dirname(__file__),
+        "www",
+        "stock-tracker-card.js",
+    )
+
+    www_path = hass.config.path("www")
+    integration_path = os.path.join(www_path, "community", "stock-tracker")
+    card_dest = os.path.join(integration_path, "stock-tracker-card.js")
+    card_dest_gz = os.path.join(integration_path, "stock-tracker-card.js.gz")
+
+    # Prüfe ob Quelldatei existiert
+    if not os.path.exists(card_source):
+        _LOGGER.warning(
+            "Custom card source not found at %s",
+            card_source,
+        )
+        return False
+
+    # Zielordner erstellen
+    os.makedirs(integration_path, exist_ok=True)
+
+    # Prüfen ob Kopieren nötig ist
+    should_copy = False
+
+    if not os.path.exists(card_dest):
+        should_copy = True
+    else:
+        source_mtime = os.path.getmtime(card_source)
+        dest_mtime = os.path.getmtime(card_dest)
+        if source_mtime > dest_mtime:
+            should_copy = True
+
+    if not should_copy:
+        _LOGGER.debug("Custom card already up to date")
+        return True
+
+    # Datei kopieren
     try:
-        with open(source_file, "rb") as f_in:
-            with gzip.open(dest_file, "wb", compresslevel=9) as f_out:
+        shutil.copy2(card_source, card_dest)
+        _LOGGER.info("Custom card copied to %s", card_dest)
+    except Exception as err:
+        _LOGGER.error("Failed to copy card: %s", err)
+        return False
+
+    # .gz Version erstellen
+    try:
+        with open(card_dest, "rb") as f_in:
+            with gzip.open(card_dest_gz, "wb", compresslevel=9) as f_out:
                 shutil.copyfileobj(f_in, f_out)
-        
-        # Dateigröße loggen
-        original_size = os.path.getsize(source_file)
-        compressed_size = os.path.getsize(dest_file)
-        compression_ratio = (1 - compressed_size / original_size) * 100
-        
-        _LOGGER.debug(
-            "Card compressed: %d bytes → %d bytes (%.1f%% smaller)",
+
+        original_size = os.path.getsize(card_dest)
+        compressed_size = os.path.getsize(card_dest_gz)
+        ratio = (1 - compressed_size / original_size) * 100
+
+        _LOGGER.info(
+            "Card compressed: %d → %d bytes (%.0f%% smaller)",
             original_size,
             compressed_size,
-            compression_ratio
+            ratio,
         )
     except Exception as err:
         _LOGGER.warning("Could not create .gz file: %s", err)
+
+    return True
 
 # =============================================================================
 # DASHBOARD AUTO-CREATION
