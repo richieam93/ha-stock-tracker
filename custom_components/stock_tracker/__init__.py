@@ -297,14 +297,6 @@ async def _async_create_default_dashboard(
             _LOGGER.debug("No symbols configured, skipping dashboard creation")
             return
 
-        # Dashboard in /config/dashboards/ speichern
-        import yaml
-        
-        dashboards_dir = hass.config.path("dashboards")
-        os.makedirs(dashboards_dir, exist_ok=True)
-        
-        dashboard_file = os.path.join(dashboards_dir, "stock_tracker_auto.yaml")
-        
         from .dashboard import DashboardGenerator
         generator = DashboardGenerator(hass)
         
@@ -314,17 +306,14 @@ async def _async_create_default_dashboard(
             coordinator_data=coordinator.data,
         )
         
-        # Als YAML speichern
-        with open(dashboard_file, "w", encoding="utf-8") as f:
-            yaml.dump(
-                dashboard_config,
-                f,
-                default_flow_style=False,
-                allow_unicode=True,
-                sort_keys=False,
-            )
+        # Dashboard in Executor speichern (async-safe)
+        await hass.async_add_executor_job(
+            _save_dashboard_yaml,
+            hass,
+            dashboard_config,
+        )
         
-        _LOGGER.info("Dashboard YAML created at %s", dashboard_file)
+        _LOGGER.info("Dashboard YAML created successfully")
         
         # Merken dass Dashboard erstellt wurde
         new_data = dict(entry.data)
@@ -337,6 +326,65 @@ async def _async_create_default_dashboard(
             err
         )
 
+
+def _save_dashboard_yaml(
+    hass: HomeAssistant,
+    dashboard_config: dict,
+) -> None:
+    """
+    Save dashboard YAML file (runs in executor, blocking is OK).
+    
+    This function runs in a thread pool, so blocking I/O is allowed.
+    """
+    import yaml
+    
+    dashboards_dir = hass.config.path("dashboards")
+    os.makedirs(dashboards_dir, exist_ok=True)
+    
+    dashboard_file = os.path.join(dashboards_dir, "stock_tracker_auto.yaml")
+    
+    # Jetzt ist blocking I/O OK, da wir im Executor laufen
+    with open(dashboard_file, "w", encoding="utf-8") as f:
+        yaml.dump(
+            dashboard_config,
+            f,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False,
+        )
+    
+    _LOGGER.debug("Dashboard YAML saved to %s", dashboard_file)
+
+
+def _create_gzip_file(source_file: str, dest_file: str) -> None:
+    """
+    Create a gzipped version of the JS file.
+    
+    This is what HACS does automatically. We replicate it here
+    so the card works the same way as HACS-installed cards.
+    
+    This function runs in executor, so blocking I/O is allowed.
+    """
+    import gzip
+    
+    try:
+        with open(source_file, "rb") as f_in:
+            with gzip.open(dest_file, "wb", compresslevel=9) as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Dateigröße loggen
+        original_size = os.path.getsize(source_file)
+        compressed_size = os.path.getsize(dest_file)
+        compression_ratio = (1 - compressed_size / original_size) * 100
+        
+        _LOGGER.debug(
+            "Card compressed: %d bytes → %d bytes (%.1f%% smaller)",
+            original_size,
+            compressed_size,
+            compression_ratio
+        )
+    except Exception as err:
+        _LOGGER.warning("Could not create .gz file: %s", err)
 
 # =============================================================================
 # WELCOME NOTIFICATION

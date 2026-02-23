@@ -1,0 +1,56 @@
+# Services for Stock Tracker Integration
+
+add_stock:
+  name: Add Stock
+  description: Add a new stock symbol to tracking. The symbol will be validated and sensors will be created automatically.
+  fields:
+    symbol:
+      name: Stock Symbol
+      description: The stock ticker symbol to add (e.g., AAPL, MSFT, SAP.DE, BTC-USD)
+      required: true
+      example: "AAPL"
+      selector:
+        text:
+
+remove_stock:
+  name: Remove Stock
+  description: Remove a stock symbol from tracking. All associated sensors will be removed.
+  fields:
+    symbol:
+      name: Stock Symbol
+      description: The stock ticker symbol to remove (e.g., AAPL)
+      required: true
+      example: "AAPL"
+      selector:
+        text:
+
+search:
+  name: Search Stocks
+  description: Search for stock symbols by company name or ticker. Results are shown as a persistent notification.
+  fields:
+    query:
+      name: Search Query
+      description: Company name or ticker symbol to search for (e.g., Apple, Tesla, SAP)
+      required: true
+      example: "Apple"
+      selector:
+        text:
+    limit:
+      name: Result Limit
+      description: Maximum number of results to return (1-50)
+      required: false
+      default: 10
+      example: 10
+      selector:
+        number:
+          min: 1
+          max: 50
+          mode: slider
+
+refresh:
+  name: Refresh All Data
+  description: Force an immediate refresh of all stock data from the configured data sources.
+
+update_database:
+  name: Update Symbol Database
+  description: Download the latest stock listings from NASDAQ, NYSE and other exchanges to update the local search database.
