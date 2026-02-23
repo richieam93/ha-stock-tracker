@@ -160,19 +160,30 @@ async def _async_update_listener(
 # =============================================================================
 
 async def _async_register_custom_card(hass: HomeAssistant) -> None:
-    """Automatically register the custom card as a Lovelace resource."""
+    """
+    Automatically register the custom card as a Lovelace resource.
+    
+    Follows HACS convention:
+    - Copy to /www/community/stock-tracker/
+    - Create .gz version
+    - Register as /hacsfiles/community/stock-tracker/stock-tracker-card.js
+    """
     try:
-        # Pfade definieren
+        # Pfade definieren (HACS-konform)
         www_path = hass.config.path("www")
+        community_path = os.path.join(www_path, "community")
+        integration_path = os.path.join(community_path, "stock-tracker")
+        
         card_source = os.path.join(
             os.path.dirname(__file__),
             "www",
             "stock-tracker-card.js"
         )
-        card_dest = os.path.join(www_path, "stock-tracker-card.js")
+        card_dest = os.path.join(integration_path, "stock-tracker-card.js")
+        card_dest_gz = f"{card_dest}.gz"
 
-        # www-Ordner erstellen falls nicht vorhanden
-        os.makedirs(www_path, exist_ok=True)
+        # Ordner erstellen
+        os.makedirs(integration_path, exist_ok=True)
 
         # Card kopieren (nur wenn Quelle neuer ist oder Ziel nicht existiert)
         if os.path.exists(card_source):
@@ -188,11 +199,20 @@ async def _async_register_custom_card(hass: HomeAssistant) -> None:
                     should_copy = True
             
             if should_copy:
+                # Original kopieren
                 shutil.copy2(card_source, card_dest)
                 _LOGGER.info(
                     "Custom card copied to %s",
                     card_dest
                 )
+                
+                # .gz Version erstellen
+                await hass.async_add_executor_job(
+                    _create_gzip_file,
+                    card_dest,
+                    card_dest_gz
+                )
+                _LOGGER.info("Custom card .gz version created")
             else:
                 _LOGGER.debug("Custom card already up to date")
         else:
@@ -202,13 +222,22 @@ async def _async_register_custom_card(hass: HomeAssistant) -> None:
             )
             return
 
-        # Als static path registrieren (HTTP-Zugriff)
+        # Als static path registrieren (HACS-Pfad)
+        # HACS verwendet /hacsfiles/ statt /local/
         hass.http.register_static_path(
-            "/local/stock-tracker-card.js",
-            card_dest,
+            "/hacsfiles/community/stock-tracker",
+            integration_path,
             cache_headers=False
         )
-        _LOGGER.debug("Custom card registered as static path")
+        _LOGGER.debug("Custom card registered as /hacsfiles/ path")
+        
+        # Auch als /local/ registrieren (Fallback)
+        hass.http.register_static_path(
+            "/local/community/stock-tracker",
+            integration_path,
+            cache_headers=False
+        )
+        _LOGGER.debug("Custom card registered as /local/ path")
 
     except Exception as err:
         _LOGGER.error(
@@ -216,6 +245,34 @@ async def _async_register_custom_card(hass: HomeAssistant) -> None:
             err
         )
 
+
+def _create_gzip_file(source_file: str, dest_file: str) -> None:
+    """
+    Create a gzipped version of the JS file.
+    
+    This is what HACS does automatically. We replicate it here
+    so the card works the same way as HACS-installed cards.
+    """
+    import gzip
+    
+    try:
+        with open(source_file, "rb") as f_in:
+            with gzip.open(dest_file, "wb", compresslevel=9) as f_out:
+                shutil.copyfileobj(f_in, f_out)
+        
+        # Dateigröße loggen
+        original_size = os.path.getsize(source_file)
+        compressed_size = os.path.getsize(dest_file)
+        compression_ratio = (1 - compressed_size / original_size) * 100
+        
+        _LOGGER.debug(
+            "Card compressed: %d bytes → %d bytes (%.1f%% smaller)",
+            original_size,
+            compressed_size,
+            compression_ratio
+        )
+    except Exception as err:
+        _LOGGER.warning("Could not create .gz file: %s", err)
 
 # =============================================================================
 # DASHBOARD AUTO-CREATION
@@ -337,9 +394,12 @@ async def _async_show_welcome_notification(
 3. **Weitere Aktien hinzufügen:**
    Einstellungen → Geräte & Dienste → Stock Tracker → Optionen
 
-⚠️ **Hinweis:** 
-Falls die Custom Card nicht funktioniert, füge sie manuell als Ressource hinzu:
-Einstellungen → Dashboards → Ressourcen → `/local/stock-tracker-card.js`
+⚠️ **Hinweis - Custom Card Ressource:**
+Falls die Card nicht automatisch funktioniert, registriere sie manuell:
+
+Einstellungen → Dashboards → Ressourcen → Ressource hinzufügen
+URL: `/hacsfiles/community/stock-tracker/stock-tracker-card.js`
+Typ: JavaScript-Modul
 
 💡 **Tipp:** 
 Nutze den Service `stock_tracker.search` um neue Aktien zu finden!
