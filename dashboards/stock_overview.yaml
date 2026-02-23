@@ -1,0 +1,460 @@
+# =============================================================================
+# STOCK TRACKER - OVERVIEW DASHBOARD
+# =============================================================================
+# 
+# Installation:
+#   1. Kopiere diese Datei nach /config/dashboards/
+#   2. In configuration.yaml hinzufügen:
+#      lovelace:
+#        mode: storage
+#        dashboards:
+#          stock-tracker:
+#            mode: yaml
+#            filename: dashboards/stock_overview.yaml
+#   3. Home Assistant neustarten
+#
+# Oder manuell importieren:
+#   1. Öffne Lovelace Dashboard
+#   2. Drei-Punkte-Menü → "Dashboard bearbeiten"
+#   3. Drei-Punkte-Menü → "Raw-Konfiguration bearbeiten"
+#   4. Inhalt einfügen
+#
+# =============================================================================
+
+title: 📊 Stock Tracker
+views:
+
+  # ===========================================================================
+  # VIEW 1: ÜBERSICHT
+  # ===========================================================================
+  - title: Übersicht
+    path: overview
+    icon: mdi:view-dashboard
+    type: custom:masonry-layout  # Falls installiert, sonst entfernen
+    badges: []
+    cards:
+
+      # -------------------------------------------------------------------------
+      # Header
+      # -------------------------------------------------------------------------
+      - type: markdown
+        content: |
+          # 📊 Meine Aktien
+          
+          Stand: {{ now().strftime('%d.%m.%Y um %H:%M') }} Uhr
+
+      # -------------------------------------------------------------------------
+      # Schnellübersicht - Alle Aktien (Grid)
+      # -------------------------------------------------------------------------
+      # WICHTIG: Passe die entity IDs an deine Symbole an!
+      # sensor.SYMBOL_price → sensor.aapl_price, sensor.msft_price, etc.
+      # -------------------------------------------------------------------------
+      
+      - type: grid
+        columns: 2
+        square: false
+        cards:
+        
+          # Beispiel Aktie 1: Apple
+          - type: custom:stock-tracker-card
+            entity: sensor.aapl_price
+            display_mode: compact
+            show_indicators: false
+            
+          # Beispiel Aktie 2: Microsoft
+          - type: custom:stock-tracker-card
+            entity: sensor.msft_price
+            display_mode: compact
+            show_indicators: false
+            
+          # Beispiel Aktie 3: Tesla
+          - type: custom:stock-tracker-card
+            entity: sensor.tsla_price
+            display_mode: compact
+            show_indicators: false
+            
+          # Beispiel Aktie 4: SAP
+          - type: custom:stock-tracker-card
+            entity: sensor.sap_de_price
+            display_mode: compact
+            show_indicators: false
+
+      # -------------------------------------------------------------------------
+      # Tagesänderungen
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📈 Tagesperformance
+        show_header_toggle: false
+        entities:
+          - entity: sensor.aapl_change
+            name: Apple
+            icon: mdi:apple
+          - entity: sensor.msft_change
+            name: Microsoft
+            icon: mdi:microsoft
+          - entity: sensor.tsla_change
+            name: Tesla
+            icon: mdi:car-electric
+          - entity: sensor.sap_de_change
+            name: SAP
+            icon: mdi:domain
+            
+      # -------------------------------------------------------------------------
+      # Kursverlauf (24h)
+      # -------------------------------------------------------------------------
+      - type: history-graph
+        title: 📉 Kursverlauf (24 Stunden)
+        hours_to_show: 24
+        entities:
+          - entity: sensor.aapl_price
+            name: Apple
+          - entity: sensor.msft_price
+            name: Microsoft
+          - entity: sensor.tsla_price
+            name: Tesla
+            
+      # -------------------------------------------------------------------------
+      # Signale & Trends
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+          - type: entities
+            title: 🔮 Trends
+            show_header_toggle: false
+            entities:
+              - entity: sensor.aapl_trend
+                name: Apple
+              - entity: sensor.msft_trend
+                name: Microsoft
+              - entity: sensor.tsla_trend
+                name: Tesla
+                
+          - type: entities
+            title: ⚡ Signale
+            show_header_toggle: false
+            entities:
+              - entity: sensor.aapl_indicators
+                name: Apple
+              - entity: sensor.msft_indicators
+                name: Microsoft
+              - entity: sensor.tsla_indicators
+                name: Tesla
+
+      # -------------------------------------------------------------------------
+      # Service Buttons
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+          - type: button
+            name: Daten aktualisieren
+            icon: mdi:refresh
+            tap_action:
+              action: call-service
+              service: stock_tracker.refresh
+              
+          - type: button
+            name: Aktie suchen
+            icon: mdi:magnify
+            tap_action:
+              action: call-service
+              service: stock_tracker.search
+              service_data:
+                query: Apple
+                limit: 5
+
+
+  # ===========================================================================
+  # VIEW 2: DETAILS
+  # ===========================================================================
+  - title: Details
+    path: details
+    icon: mdi:chart-line
+    cards:
+
+      # -------------------------------------------------------------------------
+      # Vollständige Aktien-Card (Beispiel: Apple)
+      # -------------------------------------------------------------------------
+      - type: custom:stock-tracker-card
+        entity: sensor.aapl_price
+        display_mode: full
+        show_chart: true
+        show_indicators: true
+        
+      # -------------------------------------------------------------------------
+      # Alternativ: Standard HA Cards für Details
+      # -------------------------------------------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ## 🍎 Apple Inc. (AAPL)
+              
+          # Haupt-Kennzahlen
+          - type: horizontal-stack
+            cards:
+              - type: entity
+                entity: sensor.aapl_price
+                name: Aktueller Kurs
+                icon: mdi:currency-usd
+              - type: entity
+                entity: sensor.aapl_change
+                name: Heute
+                icon: mdi:percent
+              - type: entity
+                entity: sensor.aapl_trend
+                name: Trend
+                
+          # Detaillierte Attribute
+          - type: attributes
+            entity: sensor.aapl_price
+            filter:
+              include:
+                - previous_close
+                - today_open
+                - today_high
+                - today_low
+                - volume
+                - market_cap_formatted
+                - pe_ratio
+                - dividend_yield
+                - 52_week_high
+                - 52_week_low
+                
+          # RSI Gauge
+          - type: gauge
+            entity: sensor.aapl_indicators
+            attribute: rsi_14
+            name: RSI (14)
+            min: 0
+            max: 100
+            severity:
+              green: 30
+              yellow: 50
+              red: 70
+              
+          # Langfrist-Chart
+          - type: history-graph
+            title: Kursverlauf (7 Tage)
+            hours_to_show: 168
+            entities:
+              - entity: sensor.aapl_price
+
+
+  # ===========================================================================
+  # VIEW 3: INDIKATOREN
+  # ===========================================================================
+  - title: Indikatoren
+    path: indicators
+    icon: mdi:chart-timeline-variant
+    cards:
+    
+      - type: markdown
+        content: |
+          # ⚡ Technische Analyse
+          
+          Übersicht der wichtigsten Indikatoren für alle überwachten Aktien.
+
+      # -------------------------------------------------------------------------
+      # RSI Gauges
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        title: RSI (Relative Strength Index)
+        cards:
+          - type: gauge
+            entity: sensor.aapl_indicators
+            attribute: rsi_14
+            name: AAPL
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 30
+              yellow: 50
+              red: 70
+              
+          - type: gauge
+            entity: sensor.msft_indicators
+            attribute: rsi_14
+            name: MSFT
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 30
+              yellow: 50
+              red: 70
+              
+          - type: gauge
+            entity: sensor.tsla_indicators
+            attribute: rsi_14
+            name: TSLA
+            min: 0
+            max: 100
+            needle: true
+            severity:
+              green: 30
+              yellow: 50
+              red: 70
+
+      # -------------------------------------------------------------------------
+      # Trend-Stärke
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        title: Trend-Stärke
+        cards:
+          - type: gauge
+            entity: sensor.aapl_trend
+            attribute: trend_strength
+            name: AAPL
+            min: 0
+            max: 10
+            needle: true
+            severity:
+              red: 0
+              yellow: 3
+              green: 6
+              
+          - type: gauge
+            entity: sensor.msft_trend
+            attribute: trend_strength
+            name: MSFT
+            min: 0
+            max: 10
+            needle: true
+            severity:
+              red: 0
+              yellow: 3
+              green: 6
+
+      # -------------------------------------------------------------------------
+      # Alle Indikatoren als Liste
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📊 Indikator-Signale
+        show_header_toggle: false
+        entities:
+          - type: section
+            label: Apple (AAPL)
+          - entity: sensor.aapl_indicators
+            name: Gesamtsignal
+          - entity: sensor.aapl_indicators
+            type: attribute
+            attribute: rsi_14
+            name: RSI (14)
+            icon: mdi:chart-line
+          - entity: sensor.aapl_indicators
+            type: attribute
+            attribute: macd_trend
+            name: MACD Trend
+            icon: mdi:trending-up
+          - entity: sensor.aapl_indicators
+            type: attribute
+            attribute: bollinger_position
+            name: Bollinger Position
+            icon: mdi:chart-bell-curve
+            
+          - type: section
+            label: Microsoft (MSFT)
+          - entity: sensor.msft_indicators
+            name: Gesamtsignal
+          - entity: sensor.msft_indicators
+            type: attribute
+            attribute: rsi_14
+            name: RSI (14)
+            icon: mdi:chart-line
+
+      # -------------------------------------------------------------------------
+      # Volumen-Übersicht
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📦 Handelsvolumen
+        show_header_toggle: false
+        entities:
+          - entity: sensor.aapl_volume
+            name: Apple
+          - entity: sensor.msft_volume
+            name: Microsoft
+          - entity: sensor.tsla_volume
+            name: Tesla
+
+
+  # ===========================================================================
+  # VIEW 4: EINSTELLUNGEN
+  # ===========================================================================
+  - title: Einstellungen
+    path: settings
+    icon: mdi:cog
+    cards:
+    
+      - type: markdown
+        content: |
+          # ⚙️ Stock Tracker Einstellungen
+          
+          Verwalte deine überwachten Aktien und Einstellungen.
+
+      # -------------------------------------------------------------------------
+      # Aktien verwalten
+      # -------------------------------------------------------------------------
+      - type: vertical-stack
+        cards:
+          - type: markdown
+            content: |
+              ### Aktien hinzufügen
+              
+              Nutze den Service `stock_tracker.add_stock` um neue Aktien hinzuzufügen.
+              
+          - type: entities
+            title: Service aufrufen
+            entities:
+              - type: button
+                name: Aktie hinzufügen
+                icon: mdi:plus
+                tap_action:
+                  action: navigate
+                  navigation_path: /config/integrations/integration/stock_tracker
+                  
+              - type: button
+                name: Aktie suchen
+                icon: mdi:magnify
+                tap_action:
+                  action: call-service
+                  service: stock_tracker.search
+                  service_data:
+                    query: ""
+                    
+              - type: button
+                name: Datenbank aktualisieren
+                icon: mdi:database-refresh
+                tap_action:
+                  action: call-service
+                  service: stock_tracker.update_database
+
+      # -------------------------------------------------------------------------
+      # Info
+      # -------------------------------------------------------------------------
+      - type: markdown
+        content: |
+          ### ℹ️ Informationen
+          
+          **Datenquellen:**
+          - Yahoo Finance (primär)
+          - Google Finance (Fallback)
+          - Investing.com (Fallback)
+          
+          **Aktualisierung:**
+          - Alle 5 Minuten (Standard)
+          - Manuell: Service `stock_tracker.refresh`
+          
+          **Technische Indikatoren:**
+          - RSI (14 Tage)
+          - MACD
+          - Bollinger Bänder
+          - Stochastik
+          - ADX (Trendstärke)
+          - ATR (Volatilität)
+          
+          **Symbole Beispiele:**
+          - US Aktien: `AAPL`, `MSFT`, `TSLA`
+          - Deutsche Aktien: `SAP.DE`, `BMW.DE`
+          - Krypto: `BTC-USD`, `ETH-USD`
+          - Indizes: `^GSPC` (S&P 500), `^GDAXI` (DAX)

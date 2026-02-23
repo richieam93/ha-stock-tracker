@@ -1,0 +1,414 @@
+# =============================================================================
+# STOCK TRACKER - PREIS-ALARM BLUEPRINT
+# =============================================================================
+#
+# Sendet eine Benachrichtigung wenn der Aktienkurs über oder unter einen
+# definierten Grenzwert steigt/fällt.
+#
+# Features:
+#   - Obere Preisgrenze (Verkaufssignal)
+#   - Untere Preisgrenze (Kaufsignal)
+#   - Prozentuale Änderung (großer Tagesverlust/-gewinn)
+#   - Flexible Benachrichtigungsoptionen
+#   - Cooldown um Spam zu vermeiden
+#
+# Installation:
+#   1. Kopiere diese Datei nach:
+#      /config/blueprints/automation/stock_tracker/price_alert.yaml
+#   2. In Home Assistant: Einstellungen → Automatisierungen → Blueprint erstellen
+#   3. Oder importiere direkt über die Blueprint-URL
+#
+# =============================================================================
+
+blueprint:
+  name: "📊 Stock Tracker - Preis-Alarm"
+  description: |
+    Erhalte eine Benachrichtigung wenn der Aktienkurs einen bestimmten Wert 
+    über- oder unterschreitet, oder wenn die Tagesänderung einen Schwellenwert erreicht.
+    
+    **Funktionen:**
+    - 📈 Alarm bei Kurs über Obergrenze
+    - 📉 Alarm bei Kurs unter Untergrenze  
+    - ⚡ Alarm bei großer Tagesänderung (%)
+    - 🔕 Einstellbarer Cooldown gegen Spam
+    
+    **Benötigt:** Stock Tracker Integration
+  domain: automation
+  author: "Stock Tracker"
+  
+  input:
+    # -------------------------------------------------------------------------
+    # Aktien-Sensor
+    # -------------------------------------------------------------------------
+    stock_sensor:
+      name: "📊 Aktien-Sensor"
+      description: "Wähle den Preis-Sensor der Aktie die überwacht werden soll"
+      selector:
+        entity:
+          filter:
+            - integration: stock_tracker
+              domain: sensor
+          multiple: false
+          
+    # -------------------------------------------------------------------------
+    # Preisalarme
+    # -------------------------------------------------------------------------
+    enable_upper_limit:
+      name: "📈 Obere Preisgrenze aktivieren"
+      description: "Alarm wenn der Kurs ÜBER diesen Wert steigt"
+      default: false
+      selector:
+        boolean:
+        
+    upper_price_limit:
+      name: "Obere Preisgrenze"
+      description: "Kurs bei dem ein Alarm ausgelöst wird (z.B. 200.00)"
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.01
+          unit_of_measurement: ""
+          mode: box
+          
+    enable_lower_limit:
+      name: "📉 Untere Preisgrenze aktivieren"
+      description: "Alarm wenn der Kurs UNTER diesen Wert fällt"
+      default: false
+      selector:
+        boolean:
+        
+    lower_price_limit:
+      name: "Untere Preisgrenze"
+      description: "Kurs bei dem ein Alarm ausgelöst wird (z.B. 150.00)"
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.01
+          unit_of_measurement: ""
+          mode: box
+          
+    # -------------------------------------------------------------------------
+    # Prozentuale Änderung
+    # -------------------------------------------------------------------------
+    enable_percent_change:
+      name: "⚡ Prozent-Alarm aktivieren"
+      description: "Alarm bei großer Tagesänderung (+ oder -)"
+      default: true
+      selector:
+        boolean:
+        
+    percent_threshold:
+      name: "Prozent-Schwellenwert"
+      description: "Alarm wenn Tagesänderung größer als dieser Wert (z.B. 5 für ±5%)"
+      default: 5
+      selector:
+        number:
+          min: 0.5
+          max: 50
+          step: 0.5
+          unit_of_measurement: "%"
+          mode: slider
+          
+    # -------------------------------------------------------------------------
+    # Benachrichtigung
+    # -------------------------------------------------------------------------
+    notify_device:
+      name: "📱 Benachrichtigungs-Gerät"
+      description: "Mobilgerät für Push-Benachrichtigungen"
+      default: ""
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
+          
+    enable_persistent_notification:
+      name: "🔔 Persistente Benachrichtigung"
+      description: "Zusätzlich eine Benachrichtigung in Home Assistant anzeigen"
+      default: true
+      selector:
+        boolean:
+        
+    notification_title:
+      name: "Benachrichtigungs-Titel (optional)"
+      description: "Eigener Titel für die Benachrichtigung"
+      default: ""
+      selector:
+        text:
+          
+    # -------------------------------------------------------------------------
+    # Cooldown
+    # -------------------------------------------------------------------------
+    cooldown_minutes:
+      name: "⏰ Cooldown (Minuten)"
+      description: "Mindestzeit zwischen zwei Alarmen für diese Aktie"
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 1440
+          step: 5
+          unit_of_measurement: "min"
+          mode: slider
+          
+    # -------------------------------------------------------------------------
+    # Zeitfenster
+    # -------------------------------------------------------------------------
+    enable_time_window:
+      name: "🕐 Nur zu bestimmten Zeiten"
+      description: "Alarme nur während Börsenzeiten senden"
+      default: false
+      selector:
+        boolean:
+        
+    time_start:
+      name: "Startzeit"
+      description: "Ab wann Alarme gesendet werden (z.B. 09:00)"
+      default: "09:00:00"
+      selector:
+        time:
+        
+    time_end:
+      name: "Endzeit"
+      description: "Bis wann Alarme gesendet werden (z.B. 22:00)"
+      default: "22:00:00"
+      selector:
+        time:
+
+
+# =============================================================================
+# VARIABLEN
+# =============================================================================
+
+variables:
+  # Sensor-Daten
+  sensor_entity: !input stock_sensor
+  sensor_state: "{{ states(sensor_entity) | float(0) }}"
+  sensor_name: "{{ state_attr(sensor_entity, 'company_name') or state_attr(sensor_entity, 'symbol') or sensor_entity }}"
+  sensor_symbol: "{{ state_attr(sensor_entity, 'symbol') or sensor_entity.split('.')[1].split('_')[0] | upper }}"
+  sensor_currency: "{{ state_attr(sensor_entity, 'currency') or 'USD' }}"
+  sensor_change: "{{ state_attr(sensor_entity, 'change') | float(0) }}"
+  sensor_change_pct: "{{ state_attr(sensor_entity, 'change_percent') | float(0) }}"
+  
+  # Einstellungen
+  upper_limit: !input upper_price_limit
+  lower_limit: !input lower_price_limit
+  pct_threshold: !input percent_threshold
+  enable_upper: !input enable_upper_limit
+  enable_lower: !input enable_lower_limit
+  enable_pct: !input enable_percent_change
+  
+  # Trigger-Art bestimmen
+  is_upper_trigger: "{{ enable_upper and sensor_state > upper_limit and upper_limit > 0 }}"
+  is_lower_trigger: "{{ enable_lower and sensor_state < lower_limit and lower_limit > 0 }}"
+  is_pct_trigger: "{{ enable_pct and (sensor_change_pct | abs) > pct_threshold }}"
+  is_positive_change: "{{ sensor_change_pct >= 0 }}"
+  
+  # Nachricht bauen
+  alert_type: >
+    {% if is_upper_trigger %}
+      upper
+    {% elif is_lower_trigger %}
+      lower
+    {% elif is_pct_trigger %}
+      percent
+    {% else %}
+      none
+    {% endif %}
+    
+  alert_emoji: >
+    {% if is_upper_trigger %}
+      📈🎯
+    {% elif is_lower_trigger %}
+      📉⚠️
+    {% elif is_pct_trigger and is_positive_change %}
+      🚀
+    {% elif is_pct_trigger %}
+      🔻
+    {% else %}
+      📊
+    {% endif %}
+    
+  custom_title: !input notification_title
+  notification_title_final: >
+    {% if custom_title != "" %}
+      {{ custom_title }}
+    {% else %}
+      {{ alert_emoji }} {{ sensor_symbol }} Kurs-Alarm!
+    {% endif %}
+    
+  notification_message: >
+    {% if is_upper_trigger %}
+      {{ sensor_name }} ({{ sensor_symbol }}) hat die obere Preisgrenze erreicht!
+      
+      💰 Aktueller Kurs: {{ sensor_state }} {{ sensor_currency }}
+      🎯 Grenze: {{ upper_limit }} {{ sensor_currency }}
+      📊 Tagesänderung: {{ sensor_change_pct | round(2) }}%
+      
+      Vielleicht ein guter Zeitpunkt zum Verkaufen?
+    {% elif is_lower_trigger %}
+      {{ sensor_name }} ({{ sensor_symbol }}) hat die untere Preisgrenze erreicht!
+      
+      💰 Aktueller Kurs: {{ sensor_state }} {{ sensor_currency }}
+      ⚠️ Grenze: {{ lower_limit }} {{ sensor_currency }}
+      📊 Tagesänderung: {{ sensor_change_pct | round(2) }}%
+      
+      Kaufgelegenheit oder Stop-Loss prüfen?
+    {% elif is_pct_trigger and is_positive_change %}
+      {{ sensor_name }} ({{ sensor_symbol }}) steigt stark! 🚀
+      
+      💰 Aktueller Kurs: {{ sensor_state }} {{ sensor_currency }}
+      📈 Tagesänderung: +{{ sensor_change_pct | round(2) }}%
+      💵 Absolut: +{{ sensor_change | round(2) }} {{ sensor_currency }}
+    {% elif is_pct_trigger %}
+      {{ sensor_name }} ({{ sensor_symbol }}) fällt stark! 🔻
+      
+      💰 Aktueller Kurs: {{ sensor_state }} {{ sensor_currency }}
+      📉 Tagesänderung: {{ sensor_change_pct | round(2) }}%
+      💵 Absolut: {{ sensor_change | round(2) }} {{ sensor_currency }}
+    {% else %}
+      {{ sensor_name }} ({{ sensor_symbol }}) Update
+      
+      💰 Kurs: {{ sensor_state }} {{ sensor_currency }}
+    {% endif %}
+
+
+# =============================================================================
+# TRIGGER
+# =============================================================================
+
+trigger:
+  # Trigger 1: Obere Preisgrenze überschritten
+  - platform: template
+    value_template: >
+      {{ states(sensor_entity) | float(0) > upper_limit 
+         and upper_limit > 0 
+         and enable_upper }}
+    id: "upper_limit_reached"
+    
+  # Trigger 2: Untere Preisgrenze unterschritten
+  - platform: template
+    value_template: >
+      {{ states(sensor_entity) | float(0) < lower_limit 
+         and lower_limit > 0 
+         and enable_lower }}
+    id: "lower_limit_reached"
+    
+  # Trigger 3: Große prozentuale Änderung
+  - platform: template
+    value_template: >
+      {{ (state_attr(sensor_entity, 'change_percent') | float(0)) | abs > pct_threshold 
+         and enable_pct }}
+    id: "percent_threshold_reached"
+
+
+# =============================================================================
+# BEDINGUNGEN
+# =============================================================================
+
+condition:
+  # Zeitfenster prüfen (falls aktiviert)
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: "{{ not enable_time_window }}"
+      - condition: time
+        after: !input time_start
+        before: !input time_end
+
+
+# =============================================================================
+# AKTIONEN
+# =============================================================================
+
+action:
+  # -------------------------------------------------------------------------
+  # Schritt 1: Cooldown prüfen (via input_datetime Helper)
+  # -------------------------------------------------------------------------
+  - alias: "Prüfe Cooldown"
+    choose:
+      - conditions:
+          - condition: template
+            value_template: >
+              {% set last_alert = states('input_datetime.stock_alert_' ~ sensor_symbol | lower ~ '_last') %}
+              {% if last_alert == 'unknown' or last_alert == 'unavailable' %}
+                true
+              {% else %}
+                {{ (now() - strptime(last_alert, '%Y-%m-%d %H:%M:%S')).total_seconds() > (cooldown_minutes * 60) }}
+              {% endif %}
+        sequence:
+          - alias: "Cooldown OK - Benachrichtigung senden"
+            
+            # ---------------------------------------------------------------
+            # Push-Benachrichtigung an Mobilgerät
+            # ---------------------------------------------------------------
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: "{{ notify_device != '' }}"
+                  sequence:
+                    - service: notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}
+                      data:
+                        title: "{{ notification_title_final }}"
+                        message: "{{ notification_message }}"
+                        data:
+                          tag: "stock_alert_{{ sensor_symbol | lower }}"
+                          group: "Stock Alerts"
+                          channel: "Stock Alerts"
+                          importance: high
+                          ttl: 0
+                          priority: high
+                          # iOS spezifisch
+                          push:
+                            sound:
+                              name: default
+                              critical: 1
+                              volume: 0.8
+                          # Android spezifisch
+                          notification_icon: "mdi:chart-line"
+                          color: >
+                            {% if is_positive_change %}
+                              #4CAF50
+                            {% else %}
+                              #F44336
+                            {% endif %}
+                          # Aktionen
+                          actions:
+                            - action: "VIEW_STOCK"
+                              title: "📊 Details anzeigen"
+                            - action: "DISMISS"
+                              title: "OK"
+                              
+            # ---------------------------------------------------------------
+            # Persistente Benachrichtigung in HA
+            # ---------------------------------------------------------------
+            - choose:
+                - conditions:
+                    - condition: template
+                      value_template: !input enable_persistent_notification
+                  sequence:
+                    - service: persistent_notification.create
+                      data:
+                        title: "{{ notification_title_final }}"
+                        message: "{{ notification_message }}"
+                        notification_id: "stock_alert_{{ sensor_symbol | lower }}"
+                        
+    default:
+      - alias: "Cooldown aktiv - keine Benachrichtigung"
+        service: system_log.write
+        data:
+          message: >
+            Stock Alert für {{ sensor_symbol }} übersprungen (Cooldown aktiv)
+          level: debug
+
+
+# =============================================================================
+# MODUS
+# =============================================================================
+
+mode: single
+max_exceeded: silent

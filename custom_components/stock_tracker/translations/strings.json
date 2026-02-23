@@ -1,0 +1,187 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stock Tracker Setup",
+        "description": "Search for stocks by name or enter symbols directly.\n\nExamples: AAPL, MSFT, SAP.DE, BTC-USD, ^GSPC",
+        "data": {
+          "search_query": "Search by name (e.g. Apple, Tesla, SAP)",
+          "direct_symbols": "Or enter symbols directly (e.g. AAPL, MSFT, TSLA)"
+        }
+      },
+      "select_symbol": {
+        "title": "Select Stock",
+        "description": "Select the stock you want to track:",
+        "data": {
+          "selected_symbols": "Available stocks"
+        }
+      },
+      "settings": {
+        "title": "Settings",
+        "description": "Selected symbols: {selected_symbols} ({symbol_count} total)\n\nConfigure your preferences:",
+        "data": {
+          "scan_interval": "Update interval (seconds, 60-3600)",
+          "data_source": "Preferred data source",
+          "show_indicators": "Enable technical indicators (RSI, MACD, Bollinger, etc.)"
+        }
+      }
+    },
+    "error": {
+      "no_symbols": "Please enter at least one stock symbol.",
+      "no_input": "Please enter a search term or a stock symbol.",
+      "no_results": "No stocks found for this search. Try a different term.",
+      "no_selection": "Please select at least one stock from the list.",
+      "invalid_symbols": "The following symbols could not be found: {invalid_symbols}",
+      "too_many_symbols": "Maximum of 50 symbols allowed. Please remove some first.",
+      "cannot_connect": "Could not connect to any data source. Check your internet connection.",
+      "already_tracked": "This symbol is already being tracked.",
+      "unknown": "An unexpected error occurred. Please try again."
+    },
+    "abort": {
+      "already_configured": "Stock Tracker is already configured. Use the Options menu to add more symbols.",
+      "no_symbols_found": "Could not find any valid symbols."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Stock Tracker Options",
+        "description": "Currently tracking {symbol_count} symbols:\n{current_symbols}",
+        "data": {
+          "action": "What would you like to do?"
+        }
+      },
+      "add_symbol": {
+        "title": "Add Stock",
+        "description": "Currently tracking {current_count} of {max_count} symbols.\nSearch by name or enter a symbol directly.",
+        "data": {
+          "search_query": "Search by name (e.g. Apple, BMW, Bitcoin)",
+          "direct_symbol": "Or enter symbol directly (e.g. AAPL, BMW.DE, BTC-USD)"
+        }
+      },
+      "select_from_search": {
+        "title": "Select Stock to Add",
+        "description": "Select the stock you want to add to your tracking list:",
+        "data": {
+          "selected_symbol": "Search results"
+        }
+      },
+      "remove_symbol": {
+        "title": "Remove Stock",
+        "description": "Select the stock you want to stop tracking:",
+        "data": {
+          "remove_symbol": "Stock to remove"
+        }
+      },
+      "change_settings": {
+        "title": "Change Settings",
+        "description": "Adjust integration settings:",
+        "data": {
+          "scan_interval": "Update interval (seconds, 60 = 1 min, 300 = 5 min, 3600 = 1 hour)",
+          "data_source": "Preferred data source",
+          "show_indicators": "Show technical indicators (RSI, MACD, Bollinger Bands, etc.)"
+        }
+      }
+    },
+    "error": {
+      "no_input": "Please enter a search term or symbol.",
+      "no_results": "No stocks found. Try a different search term.",
+      "invalid_symbols": "Symbol not found on any data source.",
+      "already_tracked": "This symbol is already being tracked.",
+      "too_many_symbols": "Maximum number of symbols reached (50)."
+    },
+    "abort": {
+      "no_symbols": "No symbols configured to manage.",
+      "cannot_remove_all": "Cannot remove all symbols. At least one symbol must remain.",
+      "symbols_displayed": "Your current symbols are shown as a notification."
+    }
+  },
+  "services": {
+    "add_stock": {
+      "name": "Add Stock",
+      "description": "Add a new stock symbol to tracking. The symbol will be validated and sensors will be created automatically.",
+      "fields": {
+        "symbol": {
+          "name": "Stock Symbol",
+          "description": "The stock ticker symbol to add (e.g. AAPL, MSFT, SAP.DE, BTC-USD)"
+        }
+      }
+    },
+    "remove_stock": {
+      "name": "Remove Stock",
+      "description": "Remove a stock symbol from tracking. Associated sensors will be removed.",
+      "fields": {
+        "symbol": {
+          "name": "Stock Symbol",
+          "description": "The stock ticker symbol to remove (e.g. AAPL)"
+        }
+      }
+    },
+    "search": {
+      "name": "Search Stocks",
+      "description": "Search for stock symbols by company name or ticker. Results are shown as a notification.",
+      "fields": {
+        "query": {
+          "name": "Search Query",
+          "description": "Company name or ticker symbol to search for (e.g. Apple, Tesla)"
+        },
+        "limit": {
+          "name": "Result Limit",
+          "description": "Maximum number of results to return (1-50, default: 10)"
+        }
+      }
+    },
+    "refresh": {
+      "name": "Refresh Data",
+      "description": "Force an immediate refresh of all stock data."
+    },
+    "update_database": {
+      "name": "Update Symbol Database",
+      "description": "Update the local symbol database with the latest listings from stock exchanges."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "stock_price": {
+        "name": "{symbol} Price",
+        "state_attributes": {
+          "symbol": { "name": "Symbol" },
+          "company_name": { "name": "Company" },
+          "exchange": { "name": "Exchange" },
+          "currency": { "name": "Currency" },
+          "sector": { "name": "Sector" },
+          "industry": { "name": "Industry" },
+          "change": { "name": "Change" },
+          "change_percent": { "name": "Change %" },
+          "previous_close": { "name": "Previous Close" },
+          "today_open": { "name": "Open" },
+          "today_high": { "name": "Day High" },
+          "today_low": { "name": "Day Low" },
+          "volume": { "name": "Volume" },
+          "market_cap": { "name": "Market Cap" },
+          "pe_ratio": { "name": "P/E Ratio" },
+          "eps": { "name": "EPS" },
+          "dividend_yield": { "name": "Dividend Yield" },
+          "52_week_high": { "name": "52 Week High" },
+          "52_week_low": { "name": "52 Week Low" },
+          "50_day_avg": { "name": "50 Day Average" },
+          "200_day_avg": { "name": "200 Day Average" },
+          "data_source": { "name": "Data Source" },
+          "overall_signal": { "name": "Signal" }
+        }
+      },
+      "stock_change": {
+        "name": "{symbol} Change"
+      },
+      "stock_trend": {
+        "name": "{symbol} Trend"
+      },
+      "stock_volume": {
+        "name": "{symbol} Volume"
+      },
+      "stock_indicators": {
+        "name": "{symbol} Indicators"
+      }
+    }
+  }
+}

@@ -1,0 +1,384 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Stock Tracker Einrichtung",
+        "description": "Suche Aktien nach Name oder gib Symbole direkt ein.\n\nBeispiele: AAPL, MSFT, SAP.DE, BTC-USD, ^GDAXI",
+        "data": {
+          "search_query": "🔍 Nach Name suchen (z.B. Apple, Tesla, SAP, Siemens)",
+          "direct_symbols": "✏️ Oder Symbole direkt eingeben (z.B. AAPL, MSFT, SAP.DE)"
+        }
+      },
+      "select_symbol": {
+        "title": "Aktie auswählen",
+        "description": "Wähle die Aktie aus, die du überwachen möchtest:",
+        "data": {
+          "selected_symbols": "Verfügbare Aktien"
+        }
+      },
+      "settings": {
+        "title": "Einstellungen",
+        "description": "Ausgewählte Symbole: {selected_symbols} ({symbol_count} gesamt)\n\nPasse deine Einstellungen an:",
+        "data": {
+          "scan_interval": "Aktualisierungsintervall (Sekunden, 60-3600)",
+          "data_source": "Bevorzugte Datenquelle",
+          "show_indicators": "Technische Indikatoren aktivieren (RSI, MACD, Bollinger, etc.)"
+        }
+      }
+    },
+    "error": {
+      "no_symbols": "Bitte gib mindestens ein Aktien-Symbol ein.",
+      "no_input": "Bitte gib einen Suchbegriff oder ein Symbol ein.",
+      "no_results": "Keine Aktien für diese Suche gefunden. Versuche einen anderen Begriff.",
+      "no_selection": "Bitte wähle mindestens eine Aktie aus der Liste.",
+      "invalid_symbols": "Folgende Symbole wurden nicht gefunden: {invalid_symbols}",
+      "too_many_symbols": "Maximal 50 Symbole erlaubt. Bitte entferne zuerst einige.",
+      "cannot_connect": "Keine Verbindung zu einer Datenquelle möglich. Prüfe deine Internetverbindung.",
+      "already_tracked": "Dieses Symbol wird bereits überwacht.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut."
+    },
+    "abort": {
+      "already_configured": "Stock Tracker ist bereits eingerichtet. Nutze das Optionen-Menü um weitere Symbole hinzuzufügen.",
+      "no_symbols_found": "Es konnten keine gültigen Symbole gefunden werden."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Stock Tracker Optionen",
+        "description": "Aktuell werden {symbol_count} Symbole überwacht:\n{current_symbols}",
+        "data": {
+          "action": "Was möchtest du tun?"
+        }
+      },
+      "add_symbol": {
+        "title": "Aktie hinzufügen",
+        "description": "Aktuell werden {current_count} von {max_count} Symbolen überwacht.\nSuche nach Name oder gib ein Symbol direkt ein.",
+        "data": {
+          "search_query": "🔍 Nach Name suchen (z.B. Apple, BMW, Bitcoin, Siemens)",
+          "direct_symbol": "✏️ Symbol direkt eingeben (z.B. AAPL, BMW.DE, BTC-USD)"
+        }
+      },
+      "select_from_search": {
+        "title": "Aktie zum Hinzufügen auswählen",
+        "description": "Wähle die Aktie aus, die du hinzufügen möchtest:",
+        "data": {
+          "selected_symbol": "Suchergebnisse"
+        }
+      },
+      "remove_symbol": {
+        "title": "Aktie entfernen",
+        "description": "Wähle die Aktie aus, die du nicht mehr überwachen möchtest:",
+        "data": {
+          "remove_symbol": "Aktie zum Entfernen"
+        }
+      },
+      "change_settings": {
+        "title": "Einstellungen ändern",
+        "description": "Passe die Stock Tracker Einstellungen an:",
+        "data": {
+          "scan_interval": "Aktualisierungsintervall in Sekunden (60 = 1 Min, 300 = 5 Min, 3600 = 1 Std)",
+          "data_source": "Bevorzugte Datenquelle",
+          "show_indicators": "Technische Indikatoren anzeigen (RSI, MACD, Bollinger Bänder, Stochastik, etc.)"
+        }
+      }
+    },
+    "error": {
+      "no_input": "Bitte gib einen Suchbegriff oder ein Symbol ein.",
+      "no_results": "Keine Aktien gefunden. Versuche einen anderen Suchbegriff.",
+      "invalid_symbols": "Symbol wurde bei keiner Datenquelle gefunden.",
+      "already_tracked": "Dieses Symbol wird bereits überwacht.",
+      "too_many_symbols": "Maximale Anzahl an Symbolen erreicht (50)."
+    },
+    "abort": {
+      "no_symbols": "Keine Symbole zum Verwalten vorhanden.",
+      "cannot_remove_all": "Es können nicht alle Symbole entfernt werden. Mindestens ein Symbol muss übrig bleiben.",
+      "symbols_displayed": "Deine aktuellen Symbole werden als Benachrichtigung angezeigt."
+    }
+  },
+  "services": {
+    "add_stock": {
+      "name": "Aktie hinzufügen",
+      "description": "Fügt ein neues Aktien-Symbol zur Überwachung hinzu. Das Symbol wird validiert und Sensoren werden automatisch erstellt.",
+      "fields": {
+        "symbol": {
+          "name": "Aktien-Symbol",
+          "description": "Das Ticker-Symbol der Aktie (z.B. AAPL, MSFT, SAP.DE, BTC-USD, ^GDAXI)"
+        }
+      }
+    },
+    "remove_stock": {
+      "name": "Aktie entfernen",
+      "description": "Entfernt ein Aktien-Symbol aus der Überwachung. Alle zugehörigen Sensoren werden entfernt.",
+      "fields": {
+        "symbol": {
+          "name": "Aktien-Symbol",
+          "description": "Das Ticker-Symbol der zu entfernenden Aktie (z.B. AAPL)"
+        }
+      }
+    },
+    "search": {
+      "name": "Aktien suchen",
+      "description": "Sucht nach Aktien-Symbolen anhand von Firmenname oder Ticker. Ergebnisse werden als Benachrichtigung angezeigt.",
+      "fields": {
+        "query": {
+          "name": "Suchbegriff",
+          "description": "Firmenname oder Ticker-Symbol zum Suchen (z.B. Apple, Tesla, SAP, Siemens)"
+        },
+        "limit": {
+          "name": "Maximale Ergebnisse",
+          "description": "Maximale Anzahl der Suchergebnisse (1-50, Standard: 10)"
+        }
+      }
+    },
+    "refresh": {
+      "name": "Daten aktualisieren",
+      "description": "Erzwingt eine sofortige Aktualisierung aller Aktiendaten von den konfigurierten Datenquellen."
+    },
+    "update_database": {
+      "name": "Symbol-Datenbank aktualisieren",
+      "description": "Lädt die neuesten Aktien-Listings von NASDAQ, NYSE und anderen Börsen herunter, um die lokale Suchdatenbank zu aktualisieren."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "stock_price": {
+        "name": "{symbol} Kurs",
+        "state_attributes": {
+          "symbol": { "name": "Ticker-Symbol" },
+          "company_name": { "name": "Firmenname" },
+          "exchange": { "name": "Börse" },
+          "currency": { "name": "Währung" },
+          "sector": { "name": "Sektor" },
+          "industry": { "name": "Branche" },
+          "country": { "name": "Land" },
+          "change": { "name": "Kursänderung" },
+          "change_percent": { "name": "Änderung %" },
+          "previous_close": { "name": "Vortagesschluss" },
+          "today_open": { "name": "Eröffnungskurs" },
+          "today_high": { "name": "Tageshoch" },
+          "today_low": { "name": "Tagestief" },
+          "volume": { "name": "Handelsvolumen" },
+          "avg_volume": { "name": "Durchschn. Volumen" },
+          "market_cap": { "name": "Marktkapitalisierung" },
+          "market_cap_formatted": { "name": "Marktkapitalisierung" },
+          "pe_ratio": { "name": "KGV (Kurs-Gewinn-Verhältnis)" },
+          "forward_pe": { "name": "Erwartetes KGV" },
+          "eps": { "name": "Gewinn pro Aktie (EPS)" },
+          "dividend_yield": { "name": "Dividendenrendite %" },
+          "dividend_rate": { "name": "Dividende pro Aktie" },
+          "payout_ratio": { "name": "Ausschüttungsquote %" },
+          "price_to_book": { "name": "Kurs-Buchwert-Verhältnis" },
+          "profit_margin": { "name": "Gewinnmarge %" },
+          "return_on_equity": { "name": "Eigenkapitalrendite %" },
+          "52_week_high": { "name": "52-Wochen-Hoch" },
+          "52_week_low": { "name": "52-Wochen-Tief" },
+          "50_day_avg": { "name": "50-Tage-Durchschnitt" },
+          "200_day_avg": { "name": "200-Tage-Durchschnitt" },
+          "beta": { "name": "Beta (Volatilität)" },
+          "target_price": { "name": "Analysten-Kursziel" },
+          "recommendation": { "name": "Analysten-Empfehlung" },
+          "week_change_percent": { "name": "1 Woche %" },
+          "month_change_percent": { "name": "1 Monat %" },
+          "quarter_change_percent": { "name": "3 Monate %" },
+          "ytd_change_percent": { "name": "Seit Jahresbeginn %" },
+          "data_source": { "name": "Datenquelle" },
+          "data_quality": { "name": "Datenqualität" },
+          "overall_signal": { "name": "Handelssignal" }
+        }
+      },
+      "stock_change": {
+        "name": "{symbol} Änderung %",
+        "state_attributes": {
+          "absolute_change": { "name": "Absolute Änderung" },
+          "change_direction": { "name": "Richtung" },
+          "change_magnitude": { "name": "Stärke" },
+          "week_change_percent": { "name": "1 Woche %" },
+          "month_change_percent": { "name": "1 Monat %" },
+          "quarter_change_percent": { "name": "3 Monate %" },
+          "ytd_change_percent": { "name": "Seit Jahresbeginn %" }
+        }
+      },
+      "stock_trend": {
+        "name": "{symbol} Trend",
+        "state_attributes": {
+          "trend_direction": { "name": "Trend-Richtung" },
+          "trend_strength": { "name": "Trend-Stärke (0-10)" },
+          "trend_confidence": { "name": "Konfidenz %" },
+          "volatility": { "name": "Volatilität %" },
+          "volatility_level": { "name": "Volatilitäts-Stufe" },
+          "short_term_trend": { "name": "Kurzfristig (5 Tage)" },
+          "medium_term_trend": { "name": "Mittelfristig (20 Tage)" },
+          "long_term_trend": { "name": "Langfristig (50 Tage)" },
+          "above_50d_avg": { "name": "Über 50-Tage-Schnitt" },
+          "above_200d_avg": { "name": "Über 200-Tage-Schnitt" },
+          "distance_50d_avg_pct": { "name": "Abstand zum 50-Tage-Schnitt %" },
+          "distance_200d_avg_pct": { "name": "Abstand zum 200-Tage-Schnitt %" },
+          "support_1": { "name": "Unterstützung 1" },
+          "support_2": { "name": "Unterstützung 2" },
+          "resistance_1": { "name": "Widerstand 1" },
+          "resistance_2": { "name": "Widerstand 2" },
+          "sma_5": { "name": "SMA 5 Tage" },
+          "sma_10": { "name": "SMA 10 Tage" },
+          "sma_20": { "name": "SMA 20 Tage" },
+          "sma_50": { "name": "SMA 50 Tage" },
+          "ema_12": { "name": "EMA 12 Tage" },
+          "ema_26": { "name": "EMA 26 Tage" },
+          "overall_signal": { "name": "Gesamtsignal" },
+          "summary": { "name": "Analyse-Zusammenfassung" }
+        }
+      },
+      "stock_volume": {
+        "name": "{symbol} Volumen",
+        "state_attributes": {
+          "volume": { "name": "Handelsvolumen" },
+          "volume_formatted": { "name": "Volumen (formatiert)" },
+          "avg_volume": { "name": "Durchschn. Volumen" },
+          "avg_volume_formatted": { "name": "Durchschn. Volumen (formatiert)" },
+          "volume_ratio": { "name": "Volumen-Verhältnis" },
+          "volume_vs_average": { "name": "Volumen vs. Durchschnitt" },
+          "volume_level": { "name": "Volumen-Level" },
+          "volume_trend": { "name": "Volumen-Trend" },
+          "turnover": { "name": "Umsatz" },
+          "turnover_formatted": { "name": "Umsatz (formatiert)" },
+          "avg_volume_5d": { "name": "Durchschn. 5 Tage" },
+          "avg_volume_20d": { "name": "Durchschn. 20 Tage" }
+        }
+      },
+      "stock_indicators": {
+        "name": "{symbol} Indikatoren",
+        "state_attributes": {
+          "rsi_14": { "name": "RSI (14 Tage)" },
+          "rsi_signal": { "name": "RSI Signal" },
+          "rsi_interpretation": { "name": "RSI Interpretation" },
+          "macd": { "name": "MACD" },
+          "macd_signal_line": { "name": "MACD Signallinie" },
+          "macd_histogram": { "name": "MACD Histogramm" },
+          "macd_trend": { "name": "MACD Trend" },
+          "macd_interpretation": { "name": "MACD Interpretation" },
+          "bollinger_upper": { "name": "Bollinger Oberes Band" },
+          "bollinger_middle": { "name": "Bollinger Mittleres Band" },
+          "bollinger_lower": { "name": "Bollinger Unteres Band" },
+          "bollinger_width": { "name": "Bollinger Bandbreite" },
+          "bollinger_position": { "name": "Kurs-Position" },
+          "bollinger_interpretation": { "name": "Bollinger Interpretation" },
+          "stochastic_k": { "name": "Stochastik %K" },
+          "stochastic_d": { "name": "Stochastik %D" },
+          "stochastic_signal": { "name": "Stochastik Signal" },
+          "adx": { "name": "ADX (Trendstärke)" },
+          "adx_interpretation": { "name": "ADX Interpretation" },
+          "atr_14": { "name": "ATR (14 Tage)" },
+          "cci_20": { "name": "CCI (20 Tage)" },
+          "williams_r": { "name": "Williams %R" },
+          "sma_5": { "name": "SMA 5 Tage" },
+          "sma_10": { "name": "SMA 10 Tage" },
+          "sma_20": { "name": "SMA 20 Tage" },
+          "sma_50": { "name": "SMA 50 Tage" },
+          "ema_12": { "name": "EMA 12 Tage" },
+          "ema_26": { "name": "EMA 26 Tage" },
+          "bullish_indicators": { "name": "Kaufsignale" },
+          "bearish_indicators": { "name": "Verkaufssignale" },
+          "neutral_indicators": { "name": "Neutrale Signale" },
+          "analysis_summary": { "name": "Analyse-Zusammenfassung" }
+        }
+      }
+    }
+  },
+  "state": {
+    "sensor": {
+      "stock_trend": {
+        "strong_bullish": "Stark steigend 🚀",
+        "bullish": "Steigend 📈",
+        "neutral": "Seitwärts ➡️",
+        "bearish": "Fallend 📉",
+        "strong_bearish": "Stark fallend 🔻",
+        "unknown": "Unbekannt ❓"
+      },
+      "stock_indicators": {
+        "STRONG_BUY": "Starkes Kaufsignal 🟢",
+        "BUY": "Kaufsignal 🟩",
+        "HOLD": "Halten 🟨",
+        "SELL": "Verkaufssignal 🟧",
+        "STRONG_SELL": "Starkes Verkaufssignal 🔴",
+        "N/A": "Keine Daten"
+      }
+    }
+  },
+  "selector": {
+    "data_source": {
+      "options": {
+        "auto": "Automatisch (Beste verfügbare Quelle)",
+        "yahoo": "Yahoo Finance",
+        "google": "Google Finance",
+        "investing": "Investing.com"
+      }
+    },
+    "action": {
+      "options": {
+        "add": "➕ Aktie hinzufügen",
+        "remove": "➖ Aktie entfernen",
+        "settings": "⚙️ Einstellungen ändern",
+        "view": "👁️ Aktuelle Symbole anzeigen"
+      }
+    },
+    "volatility_level": {
+      "options": {
+        "low": "Niedrig",
+        "moderate": "Mittel",
+        "high": "Hoch",
+        "very_high": "Sehr hoch"
+      }
+    },
+    "volume_level": {
+      "options": {
+        "very_low": "Sehr niedrig",
+        "low": "Niedrig",
+        "normal": "Normal",
+        "high": "Hoch",
+        "very_high": "Sehr hoch"
+      }
+    },
+    "change_magnitude": {
+      "options": {
+        "small": "Gering",
+        "moderate": "Moderat",
+        "large": "Groß",
+        "very_large": "Sehr groß"
+      }
+    },
+    "rsi_signal": {
+      "options": {
+        "strong_oversold": "Stark überverkauft",
+        "oversold": "Überverkauft",
+        "neutral": "Neutral",
+        "overbought": "Überkauft",
+        "strong_overbought": "Stark überkauft"
+      }
+    },
+    "macd_trend": {
+      "options": {
+        "bullish": "Bullisch (Kaufsignal)",
+        "bearish": "Bärisch (Verkaufssignal)",
+        "bullish_crossover": "Bullischer Crossover ⬆️",
+        "bearish_crossover": "Bärischer Crossover ⬇️"
+      }
+    },
+    "stochastic_signal": {
+      "options": {
+        "oversold": "Überverkauft (Kaufchance)",
+        "neutral": "Neutral",
+        "overbought": "Überkauft (Vorsicht)"
+      }
+    }
+  },
+  "exceptions": {
+    "symbol_not_found": "Das Symbol '{symbol}' wurde bei keiner Datenquelle gefunden.",
+    "max_symbols_reached": "Maximale Anzahl von {max} Symbolen erreicht.",
+    "symbol_already_tracked": "Das Symbol '{symbol}' wird bereits überwacht.",
+    "cannot_remove_last": "Das letzte Symbol kann nicht entfernt werden.",
+    "not_configured": "Stock Tracker ist nicht konfiguriert.",
+    "connection_error": "Verbindungsfehler: Keine Datenquelle erreichbar.",
+    "database_error": "Datenbankfehler: {error}",
+    "update_failed": "Aktualisierung fehlgeschlagen: {error}"
+  }
+}

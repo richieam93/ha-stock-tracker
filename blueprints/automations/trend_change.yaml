@@ -1,0 +1,229 @@
+# =============================================================================
+# STOCK TRACKER - TREND ÄNDERUNG BLUEPRINT
+# =============================================================================
+#
+# Sendet eine Benachrichtigung wenn sich der Trend einer Aktie ändert.
+# Z.B. von "bearish" zu "bullish" oder umgekehrt.
+#
+# =============================================================================
+
+blueprint:
+  name: "🔄 Stock Tracker - Trend-Änderung"
+  description: |
+    Erhalte eine Benachrichtigung wenn sich der Trend einer Aktie ändert.
+    
+    **Beispiele:**
+    - 📉→📈 Bearish zu Bullish (möglicher Einstieg)
+    - 📈→📉 Bullish zu Bearish (möglicher Ausstieg)
+    
+    **Benötigt:** Stock Tracker Integration
+  domain: automation
+  author: "Stock Tracker"
+  
+  input:
+    trend_sensor:
+      name: "🔮 Trend-Sensor"
+      description: "Wähle den Trend-Sensor der Aktie (sensor.SYMBOL_trend)"
+      selector:
+        entity:
+          filter:
+            - integration: stock_tracker
+              domain: sensor
+          multiple: false
+          
+    from_trend:
+      name: "📉 Von Trend"
+      description: "Auslösen wenn Trend von diesem Wert wechselt"
+      default: "bearish"
+      selector:
+        select:
+          options:
+            - label: "Stark Bullisch"
+              value: "strong_bullish"
+            - label: "Bullisch"
+              value: "bullish"
+            - label: "Neutral"
+              value: "neutral"
+            - label: "Bärisch"
+              value: "bearish"
+            - label: "Stark Bärisch"
+              value: "strong_bearish"
+            - label: "Beliebig"
+              value: "any"
+              
+    to_trend:
+      name: "📈 Zu Trend"
+      description: "Auslösen wenn Trend zu diesem Wert wechselt"
+      default: "bullish"
+      selector:
+        select:
+          options:
+            - label: "Stark Bullisch"
+              value: "strong_bullish"
+            - label: "Bullisch"
+              value: "bullish"
+            - label: "Neutral"
+              value: "neutral"
+            - label: "Bärisch"
+              value: "bearish"
+            - label: "Stark Bärisch"
+              value: "strong_bearish"
+            - label: "Beliebig"
+              value: "any"
+              
+    notify_device:
+      name: "📱 Benachrichtigungs-Gerät"
+      description: "Mobilgerät für Push-Benachrichtigungen"
+      default: ""
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
+          
+    enable_persistent:
+      name: "🔔 Persistente Benachrichtigung"
+      description: "Auch in Home Assistant anzeigen"
+      default: true
+      selector:
+        boolean:
+
+
+# =============================================================================
+# VARIABLEN
+# =============================================================================
+
+variables:
+  sensor_entity: !input trend_sensor
+  from_state: !input from_trend
+  to_state: !input to_trend
+  
+  sensor_symbol: >
+    {% set parts = sensor_entity.split('.')[1].split('_') %}
+    {{ parts[0] | upper }}
+    
+  old_trend: "{{ trigger.from_state.state }}"
+  new_trend: "{{ trigger.to_state.state }}"
+  
+  trend_emoji: >
+    {% set trends = {
+      'strong_bullish': '🚀',
+      'bullish': '📈',
+      'neutral': '➡️',
+      'bearish': '📉',
+      'strong_bearish': '🔻'
+    } %}
+    {{ trends.get(new_trend, '❓') }}
+    
+  trend_label: >
+    {% set labels = {
+      'strong_bullish': 'Stark Steigend',
+      'bullish': 'Steigend',
+      'neutral': 'Seitwärts',
+      'bearish': 'Fallend',
+      'strong_bearish': 'Stark Fallend'
+    } %}
+    {{ labels.get(new_trend, new_trend) }}
+    
+  old_trend_label: >
+    {% set labels = {
+      'strong_bullish': 'Stark Steigend',
+      'bullish': 'Steigend',
+      'neutral': 'Seitwärts',
+      'bearish': 'Fallend',
+      'strong_bearish': 'Stark Fallend'
+    } %}
+    {{ labels.get(old_trend, old_trend) }}
+    
+  is_bullish_change: "{{ new_trend in ['bullish', 'strong_bullish'] }}"
+  
+  notification_color: >
+    {% if is_bullish_change %}
+      #4CAF50
+    {% else %}
+      #F44336
+    {% endif %}
+
+
+# =============================================================================
+# TRIGGER
+# =============================================================================
+
+trigger:
+  - platform: state
+    entity_id: !input trend_sensor
+    not_from:
+      - "unknown"
+      - "unavailable"
+    not_to:
+      - "unknown"
+      - "unavailable"
+
+
+# =============================================================================
+# BEDINGUNGEN
+# =============================================================================
+
+condition:
+  - condition: template
+    value_template: >
+      {% set old = trigger.from_state.state %}
+      {% set new = trigger.to_state.state %}
+      {% set from_match = from_state == 'any' or old == from_state %}
+      {% set to_match = to_state == 'any' or new == to_state %}
+      {{ from_match and to_match and old != new }}
+
+
+# =============================================================================
+# AKTIONEN
+# =============================================================================
+
+action:
+  # Push-Benachrichtigung
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_device != '' }}"
+        sequence:
+          - service: notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}
+            data:
+              title: "{{ trend_emoji }} {{ sensor_symbol }} Trend-Wechsel!"
+              message: |
+                Der Trend hat sich geändert:
+                
+                {{ old_trend_label }} ➔ {{ trend_label }}
+                
+                {% if is_bullish_change %}
+                📈 Mögliche Aufwärtsbewegung!
+                {% else %}
+                📉 Mögliche Abwärtsbewegung!
+                {% endif %}
+              data:
+                tag: "trend_change_{{ sensor_symbol | lower }}"
+                group: "Stock Trends"
+                color: "{{ notification_color }}"
+                actions:
+                  - action: "VIEW_STOCK"
+                    title: "📊 Details"
+                    
+  # Persistente Benachrichtigung
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: !input enable_persistent
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "{{ trend_emoji }} {{ sensor_symbol }} Trend-Wechsel"
+              message: |
+                **Trend geändert:** {{ old_trend_label }} ➔ {{ trend_label }}
+                
+                {% if is_bullish_change %}
+                📈 Der Trend hat sich verbessert!
+                {% else %}
+                📉 Der Trend hat sich verschlechtert!
+                {% endif %}
+              notification_id: "trend_{{ sensor_symbol | lower }}"
+
+
+mode: single

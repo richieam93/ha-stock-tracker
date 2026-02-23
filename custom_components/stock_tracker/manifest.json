@@ -1,0 +1,16 @@
+{
+  "domain": "stock_tracker",
+  "name": "Stock Tracker",
+  "codeowners": ["@richieam93"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/richieam93/ha-stock-tracker",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/richieam93/ha-stock-tracker/issues",
+  "requirements": [
+    "yfinance==0.2.40",
+    "beautifulsoup4==4.12.3"
+  ],
+  "version": "1.0.0",
+  "integration_type": "hub"
+}

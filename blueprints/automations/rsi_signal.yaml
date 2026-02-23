@@ -1,0 +1,485 @@
+# =============================================================================
+# STOCK TRACKER - RSI SIGNAL BLUEPRINT
+# =============================================================================
+#
+# Sendet eine Benachrichtigung basierend auf dem RSI (Relative Strength Index).
+# 
+# RSI Interpretation:
+#   - RSI < 30: Überverkauft (mögliche Kaufgelegenheit)
+#   - RSI > 70: Überkauft (mögliche Verkaufsgelegenheit)
+#   - RSI 30-70: Neutral
+#
+# Features:
+#   - Benachrichtigung bei überverkauft (RSI < 30)
+#   - Benachrichtigung bei überkauft (RSI > 70)
+#   - Einstellbare RSI-Schwellenwerte
+#   - MACD-Bestätigung optional
+#   - Trend-Bestätigung optional
+#   - Cooldown gegen Spam
+#
+# Installation:
+#   1. Kopiere diese Datei nach:
+#      /config/blueprints/automation/stock_tracker/rsi_signal.yaml
+#   2. Automation erstellen über Blueprint
+#
+# =============================================================================
+
+blueprint:
+  name: "📈 Stock Tracker - RSI Signal"
+  description: |
+    Erhalte Trading-Signale basierend auf dem RSI-Indikator.
+    
+    **Was ist RSI?**
+    Der Relative Strength Index misst die Stärke von Kursbewegungen.
+    - RSI < 30 = Überverkauft (Aktie könnte steigen)
+    - RSI > 70 = Überkauft (Aktie könnte fallen)
+    
+    **Funktionen:**
+    - 📉 Signal bei überverkauft (Kaufsignal)
+    - 📈 Signal bei überkauft (Verkaufssignal)
+    - 🔄 Optional: MACD-Bestätigung
+    - 📊 Optional: Trend-Bestätigung
+    - ⏰ Cooldown gegen Benachrichtigungs-Spam
+    
+    **Benötigt:** Stock Tracker Integration mit aktivierten Indikatoren
+  domain: automation
+  author: "Stock Tracker"
+  
+  input:
+    # -------------------------------------------------------------------------
+    # Sensor Auswahl
+    # -------------------------------------------------------------------------
+    indicator_sensor:
+      name: "📊 Indikatoren-Sensor"
+      description: "Wähle den Indikatoren-Sensor der Aktie (sensor.SYMBOL_indicators)"
+      selector:
+        entity:
+          filter:
+            - integration: stock_tracker
+              domain: sensor
+          multiple: false
+          
+    price_sensor:
+      name: "💰 Preis-Sensor (optional)"
+      description: "Preis-Sensor für zusätzliche Infos in der Nachricht"
+      default: ""
+      selector:
+        entity:
+          filter:
+            - integration: stock_tracker
+              domain: sensor
+          multiple: false
+          
+    # -------------------------------------------------------------------------
+    # RSI Einstellungen
+    # -------------------------------------------------------------------------
+    enable_oversold_alert:
+      name: "📉 Überverkauft-Signal aktivieren"
+      description: "Benachrichtigung wenn RSI unter den Schwellenwert fällt (Kaufsignal)"
+      default: true
+      selector:
+        boolean:
+        
+    oversold_threshold:
+      name: "Überverkauft-Schwelle"
+      description: "RSI-Wert unter dem ein Kaufsignal ausgelöst wird (Standard: 30)"
+      default: 30
+      selector:
+        number:
+          min: 10
+          max: 40
+          step: 1
+          unit_of_measurement: ""
+          mode: slider
+          
+    enable_overbought_alert:
+      name: "📈 Überkauft-Signal aktivieren"
+      description: "Benachrichtigung wenn RSI über den Schwellenwert steigt (Verkaufssignal)"
+      default: true
+      selector:
+        boolean:
+        
+    overbought_threshold:
+      name: "Überkauft-Schwelle"
+      description: "RSI-Wert über dem ein Verkaufssignal ausgelöst wird (Standard: 70)"
+      default: 70
+      selector:
+        number:
+          min: 60
+          max: 90
+          step: 1
+          unit_of_measurement: ""
+          mode: slider
+          
+    # -------------------------------------------------------------------------
+    # Bestätigungen
+    # -------------------------------------------------------------------------
+    require_macd_confirmation:
+      name: "🔄 MACD-Bestätigung erforderlich"
+      description: |
+        Signal nur senden wenn MACD das RSI-Signal bestätigt.
+        - Kaufsignal: RSI überverkauft UND MACD bullisch
+        - Verkaufssignal: RSI überkauft UND MACD bärisch
+      default: false
+      selector:
+        boolean:
+        
+    require_trend_confirmation:
+      name: "📊 Trend-Bestätigung erforderlich"
+      description: |
+        Signal nur senden wenn der Trend das Signal unterstützt.
+        Verhindert Signale gegen den Haupttrend.
+      default: false
+      selector:
+        boolean:
+        
+    # -------------------------------------------------------------------------
+    # Benachrichtigung
+    # -------------------------------------------------------------------------
+    notify_device:
+      name: "📱 Benachrichtigungs-Gerät"
+      description: "Mobilgerät für Push-Benachrichtigungen"
+      default: ""
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
+          
+    enable_persistent_notification:
+      name: "🔔 Persistente Benachrichtigung"
+      description: "Zusätzlich eine Benachrichtigung in Home Assistant anzeigen"
+      default: true
+      selector:
+        boolean:
+        
+    enable_tts:
+      name: "🔊 Sprachausgabe"
+      description: "Signal per TTS ansagen (z.B. über Google Home)"
+      default: false
+      selector:
+        boolean:
+        
+    tts_target:
+      name: "TTS Ziel (optional)"
+      description: "Media Player für Sprachausgabe"
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: media_player
+          multiple: false
+          
+    # -------------------------------------------------------------------------
+    # Cooldown
+    # -------------------------------------------------------------------------
+    cooldown_hours:
+      name: "⏰ Cooldown (Stunden)"
+      description: "Mindestzeit zwischen zwei RSI-Signalen für diese Aktie"
+      default: 4
+      selector:
+        number:
+          min: 1
+          max: 48
+          step: 1
+          unit_of_measurement: "h"
+          mode: slider
+
+
+# =============================================================================
+# VARIABLEN
+# =============================================================================
+
+variables:
+  # Sensor-Daten
+  ind_entity: !input indicator_sensor
+  price_entity: !input price_sensor
+  
+  # RSI Werte
+  rsi_value: "{{ state_attr(ind_entity, 'rsi_14') | float(50) }}"
+  rsi_signal: "{{ state_attr(ind_entity, 'rsi_signal') or 'neutral' }}"
+  
+  # MACD Werte
+  macd_trend: "{{ state_attr(ind_entity, 'macd_trend') or 'neutral' }}"
+  macd_value: "{{ state_attr(ind_entity, 'macd') | float(0) }}"
+  
+  # Trend Werte
+  overall_signal: "{{ states(ind_entity) or 'N/A' }}"
+  
+  # Symbol extrahieren
+  sensor_symbol: >
+    {% set entity_id = ind_entity %}
+    {% set parts = entity_id.split('.')[1].split('_') %}
+    {{ parts[0] | upper }}
+    
+  # Preis-Daten (falls verfügbar)
+  current_price: >
+    {% if price_entity != "" %}
+      {{ states(price_entity) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+  price_currency: >
+    {% if price_entity != "" %}
+      {{ state_attr(price_entity, 'currency') or 'USD' }}
+    {% else %}
+      USD
+    {% endif %}
+  company_name: >
+    {% if price_entity != "" %}
+      {{ state_attr(price_entity, 'company_name') or sensor_symbol }}
+    {% else %}
+      {{ sensor_symbol }}
+    {% endif %}
+  change_pct: >
+    {% if price_entity != "" %}
+      {{ state_attr(price_entity, 'change_percent') | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+    
+  # Schwellenwerte
+  oversold: !input oversold_threshold
+  overbought: !input overbought_threshold
+  
+  # Einstellungen
+  enable_oversold: !input enable_oversold_alert
+  enable_overbought: !input enable_overbought_alert
+  require_macd: !input require_macd_confirmation
+  require_trend: !input require_trend_confirmation
+  
+  # Signal-Typ bestimmen
+  is_oversold: "{{ rsi_value < oversold }}"
+  is_overbought: "{{ rsi_value > overbought }}"
+  
+  # MACD Bestätigung
+  macd_confirms_buy: "{{ macd_trend == 'bullish' or macd_trend == 'bullish_crossover' }}"
+  macd_confirms_sell: "{{ macd_trend == 'bearish' or macd_trend == 'bearish_crossover' }}"
+  
+  # Finales Signal
+  send_buy_signal: >
+    {{ enable_oversold and is_oversold 
+       and (not require_macd or macd_confirms_buy) }}
+  send_sell_signal: >
+    {{ enable_overbought and is_overbought 
+       and (not require_macd or macd_confirms_sell) }}
+       
+  signal_type: >
+    {% if send_buy_signal %}
+      buy
+    {% elif send_sell_signal %}
+      sell
+    {% else %}
+      none
+    {% endif %}
+    
+  signal_emoji: >
+    {% if send_buy_signal %}
+      📈💡
+    {% elif send_sell_signal %}
+      📉⚠️
+    {% else %}
+      📊
+    {% endif %}
+    
+  signal_color: >
+    {% if send_buy_signal %}
+      #4CAF50
+    {% elif send_sell_signal %}
+      #F44336
+    {% else %}
+      #9E9E9E
+    {% endif %}
+    
+  notification_title: >
+    {% if send_buy_signal %}
+      {{ signal_emoji }} {{ sensor_symbol }} - Mögliches Kaufsignal!
+    {% elif send_sell_signal %}
+      {{ signal_emoji }} {{ sensor_symbol }} - Mögliches Verkaufssignal!
+    {% else %}
+      📊 {{ sensor_symbol }} RSI Update
+    {% endif %}
+    
+  notification_message: >
+    {% if send_buy_signal %}
+      **{{ company_name }} ({{ sensor_symbol }})** könnte überverkauft sein!
+      
+      📊 **RSI (14):** {{ rsi_value | round(1) }} (unter {{ oversold }})
+      {% if require_macd and macd_confirms_buy %}
+      🔄 **MACD:** Bullisch ✅ (Bestätigung)
+      {% endif %}
+      {% if current_price > 0 %}
+      💰 **Aktueller Kurs:** {{ current_price }} {{ price_currency }}
+      📈 **Tagesänderung:** {{ change_pct | round(2) }}%
+      {% endif %}
+      
+      💡 **Interpretation:**
+      Ein niedriger RSI deutet darauf hin, dass die Aktie möglicherweise unterbewertet ist.
+      Dies könnte eine Kaufgelegenheit sein.
+      
+      ⚠️ Dies ist keine Anlageberatung!
+    {% elif send_sell_signal %}
+      **{{ company_name }} ({{ sensor_symbol }})** könnte überkauft sein!
+      
+      📊 **RSI (14):** {{ rsi_value | round(1) }} (über {{ overbought }})
+      {% if require_macd and macd_confirms_sell %}
+      🔄 **MACD:** Bärisch ✅ (Bestätigung)
+      {% endif %}
+      {% if current_price > 0 %}
+      💰 **Aktueller Kurs:** {{ current_price }} {{ price_currency }}
+      📈 **Tagesänderung:** {{ change_pct | round(2) }}%
+      {% endif %}
+      
+      ⚠️ **Interpretation:**
+      Ein hoher RSI deutet darauf hin, dass die Aktie möglicherweise überbewertet ist.
+      Eine Korrektur könnte bevorstehen.
+      
+      ⚠️ Dies ist keine Anlageberatung!
+    {% else %}
+      {{ sensor_symbol }} RSI: {{ rsi_value | round(1) }}
+    {% endif %}
+    
+  tts_message: >
+    {% if send_buy_signal %}
+      Achtung! {{ company_name }} zeigt ein mögliches Kaufsignal. 
+      Der RSI liegt bei {{ rsi_value | round(0) }}, was auf eine überverkaufte Situation hindeutet.
+    {% elif send_sell_signal %}
+      Achtung! {{ company_name }} zeigt ein mögliches Verkaufssignal.
+      Der RSI liegt bei {{ rsi_value | round(0) }}, was auf eine überkaufte Situation hindeutet.
+    {% else %}
+      {{ company_name }} RSI Update. Aktueller Wert: {{ rsi_value | round(0) }}
+    {% endif %}
+
+
+# =============================================================================
+# TRIGGER
+# =============================================================================
+
+trigger:
+  # Trigger 1: RSI unter Überverkauft-Schwelle
+  - platform: template
+    value_template: >
+      {{ state_attr(ind_entity, 'rsi_14') | float(50) < oversold 
+         and enable_oversold }}
+    id: "rsi_oversold"
+    for:
+      minutes: 1
+      
+  # Trigger 2: RSI über Überkauft-Schwelle
+  - platform: template
+    value_template: >
+      {{ state_attr(ind_entity, 'rsi_14') | float(50) > overbought 
+         and enable_overbought }}
+    id: "rsi_overbought"
+    for:
+      minutes: 1
+
+
+# =============================================================================
+# BEDINGUNGEN
+# =============================================================================
+
+condition:
+  # Mindestens ein Signal muss aktiv sein
+  - condition: template
+    value_template: "{{ send_buy_signal or send_sell_signal }}"
+    
+  # RSI muss einen gültigen Wert haben
+  - condition: template
+    value_template: "{{ rsi_value > 0 and rsi_value < 100 }}"
+
+
+# =============================================================================
+# AKTIONEN
+# =============================================================================
+
+action:
+  # -------------------------------------------------------------------------
+  # Push-Benachrichtigung
+  # -------------------------------------------------------------------------
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_device != '' }}"
+        sequence:
+          - service: notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }}"
+              data:
+                tag: "rsi_signal_{{ sensor_symbol | lower }}"
+                group: "Stock Signals"
+                channel: "Trading Signals"
+                importance: high
+                ttl: 0
+                priority: high
+                # Farbe basierend auf Signal
+                color: "{{ signal_color }}"
+                notification_icon: >
+                  {% if send_buy_signal %}
+                    mdi:trending-up
+                  {% else %}
+                    mdi:trending-down
+                  {% endif %}
+                # iOS
+                push:
+                  sound:
+                    name: default
+                    critical: 1
+                    volume: 0.8
+                  interruption-level: time-sensitive
+                # Aktionen
+                actions:
+                  - action: "VIEW_CHART_{{ sensor_symbol }}"
+                    title: "📊 Chart öffnen"
+                  - action: "DISMISS"
+                    title: "OK"
+                    
+  # -------------------------------------------------------------------------
+  # Persistente Benachrichtigung
+  # -------------------------------------------------------------------------
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: !input enable_persistent_notification
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "{{ notification_title }}"
+              message: "{{ notification_message }}"
+              notification_id: "rsi_signal_{{ sensor_symbol | lower }}"
+              
+  # -------------------------------------------------------------------------
+  # TTS Sprachausgabe
+  # -------------------------------------------------------------------------
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ enable_tts and tts_target != '' }}"
+        sequence:
+          - service: tts.speak
+            target:
+              entity_id: !input tts_target
+            data:
+              message: "{{ tts_message }}"
+              cache: false
+              
+  # -------------------------------------------------------------------------
+  # Log-Eintrag
+  # -------------------------------------------------------------------------
+  - service: system_log.write
+    data:
+      message: >
+        RSI Signal für {{ sensor_symbol }}: 
+        Type={{ signal_type }}, RSI={{ rsi_value }}, 
+        MACD={{ macd_trend }}, Overall={{ overall_signal }}
+      level: info
+      logger: stock_tracker.rsi_signal
+
+
+# =============================================================================
+# MODUS
+# =============================================================================
+
+mode: single
+max_exceeded: silent

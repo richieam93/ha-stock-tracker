@@ -1,0 +1,474 @@
+# =============================================================================
+# STOCK TRACKER - PORTFOLIO DASHBOARD
+# =============================================================================
+#
+# Ein fokussiertes Dashboard für Portfolio-Tracking.
+# Zeigt alle Positionen, Performance und Vergleiche.
+#
+# =============================================================================
+
+title: 💼 Portfolio
+views:
+
+  # ===========================================================================
+  # VIEW 1: PORTFOLIO ÜBERSICHT
+  # ===========================================================================
+  - title: Portfolio
+    path: portfolio
+    icon: mdi:briefcase
+    cards:
+    
+      # -------------------------------------------------------------------------
+      # Header mit Datum
+      # -------------------------------------------------------------------------
+      - type: markdown
+        content: |
+          # 💼 Mein Portfolio
+          
+          Stand: **{{ now().strftime('%A, %d. %B %Y') }}** um {{ now().strftime('%H:%M') }} Uhr
+          
+      # -------------------------------------------------------------------------
+      # Alle Positionen (Kompakte Übersicht)
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📊 Positionen
+        show_header_toggle: false
+        state_color: true
+        entities:
+        
+          - type: section
+            label: "🇺🇸 US Aktien"
+            
+          - entity: sensor.aapl_price
+            name: Apple Inc.
+            secondary_info: last-updated
+            
+          - entity: sensor.msft_price
+            name: Microsoft Corp.
+            secondary_info: last-updated
+            
+          - entity: sensor.tsla_price
+            name: Tesla Inc.
+            secondary_info: last-updated
+            
+          - entity: sensor.googl_price
+            name: Alphabet Inc.
+            secondary_info: last-updated
+            
+          - entity: sensor.amzn_price
+            name: Amazon.com Inc.
+            secondary_info: last-updated
+            
+          - type: section
+            label: "🇩🇪 Deutsche Aktien"
+            
+          - entity: sensor.sap_de_price
+            name: SAP SE
+            secondary_info: last-updated
+            
+          - entity: sensor.bmw_de_price
+            name: BMW AG
+            secondary_info: last-updated
+            
+          - entity: sensor.sie_de_price
+            name: Siemens AG
+            secondary_info: last-updated
+            
+          - type: section
+            label: "🪙 Kryptowährungen"
+            
+          - entity: sensor.btc_usd_price
+            name: Bitcoin
+            secondary_info: last-updated
+            
+          - entity: sensor.eth_usd_price
+            name: Ethereum
+            secondary_info: last-updated
+
+      # -------------------------------------------------------------------------
+      # Tagesperformance Vergleich
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+          - type: entities
+            title: 📈 Gewinner heute
+            show_header_toggle: false
+            entities:
+              # Sortiere manuell oder nutze auto-entities card
+              - entity: sensor.aapl_change
+                name: Apple
+              - entity: sensor.msft_change
+                name: Microsoft
+              - entity: sensor.googl_change
+                name: Alphabet
+                
+          - type: entities
+            title: 📉 Verlierer heute
+            show_header_toggle: false
+            entities:
+              - entity: sensor.tsla_change
+                name: Tesla
+              - entity: sensor.btc_usd_change
+                name: Bitcoin
+
+      # -------------------------------------------------------------------------
+      # Performance Chart
+      # -------------------------------------------------------------------------
+      - type: history-graph
+        title: 📉 Portfolio Kursverlauf (7 Tage)
+        hours_to_show: 168
+        refresh_interval: 300
+        entities:
+          - entity: sensor.aapl_price
+            name: Apple
+          - entity: sensor.msft_price
+            name: Microsoft
+          - entity: sensor.tsla_price
+            name: Tesla
+          - entity: sensor.btc_usd_price
+            name: Bitcoin
+
+      # -------------------------------------------------------------------------
+      # Kennzahlen Grid
+      # -------------------------------------------------------------------------
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+        
+          # Card 1: Trend Übersicht
+          - type: entities
+            title: 🔮 Trends
+            show_header_toggle: false
+            entities:
+              - entity: sensor.aapl_trend
+                name: Apple
+              - entity: sensor.msft_trend
+                name: Microsoft
+              - entity: sensor.tsla_trend
+                name: Tesla
+              - entity: sensor.btc_usd_trend
+                name: Bitcoin
+                
+          # Card 2: Signale
+          - type: entities
+            title: ⚡ Signale
+            show_header_toggle: false
+            entities:
+              - entity: sensor.aapl_indicators
+                name: Apple
+              - entity: sensor.msft_indicators
+                name: Microsoft
+              - entity: sensor.tsla_indicators
+                name: Tesla
+              - entity: sensor.btc_usd_indicators
+                name: Bitcoin
+                
+          # Card 3: Volumen
+          - type: entities
+            title: 📦 Volumen
+            show_header_toggle: false
+            entities:
+              - entity: sensor.aapl_volume
+                name: Apple
+              - entity: sensor.msft_volume
+                name: Microsoft
+              - entity: sensor.tsla_volume
+                name: Tesla
+
+
+  # ===========================================================================
+  # VIEW 2: PERFORMANCE ANALYSE
+  # ===========================================================================
+  - title: Performance
+    path: performance
+    icon: mdi:chart-areaspline
+    cards:
+    
+      - type: markdown
+        content: |
+          # 📈 Performance Analyse
+          
+          Vergleiche die Performance über verschiedene Zeiträume.
+
+      # -------------------------------------------------------------------------
+      # Zeitraum-Performance Cards
+      # -------------------------------------------------------------------------
+      - type: horizontal-stack
+        cards:
+        
+          # 1 Woche
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "### 📅 1 Woche"
+              - type: entities
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.aapl_price
+                    type: attribute
+                    attribute: week_change_percent
+                    name: Apple
+                    suffix: "%"
+                  - entity: sensor.msft_price
+                    type: attribute
+                    attribute: week_change_percent
+                    name: Microsoft
+                    suffix: "%"
+                  - entity: sensor.tsla_price
+                    type: attribute
+                    attribute: week_change_percent
+                    name: Tesla
+                    suffix: "%"
+                    
+          # 1 Monat
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "### 📅 1 Monat"
+              - type: entities
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.aapl_price
+                    type: attribute
+                    attribute: month_change_percent
+                    name: Apple
+                    suffix: "%"
+                  - entity: sensor.msft_price
+                    type: attribute
+                    attribute: month_change_percent
+                    name: Microsoft
+                    suffix: "%"
+                  - entity: sensor.tsla_price
+                    type: attribute
+                    attribute: month_change_percent
+                    name: Tesla
+                    suffix: "%"
+                    
+          # YTD
+          - type: vertical-stack
+            cards:
+              - type: markdown
+                content: "### 📅 YTD"
+              - type: entities
+                show_header_toggle: false
+                entities:
+                  - entity: sensor.aapl_price
+                    type: attribute
+                    attribute: ytd_change_percent
+                    name: Apple
+                    suffix: "%"
+                  - entity: sensor.msft_price
+                    type: attribute
+                    attribute: ytd_change_percent
+                    name: Microsoft
+                    suffix: "%"
+                  - entity: sensor.tsla_price
+                    type: attribute
+                    attribute: ytd_change_percent
+                    name: Tesla
+                    suffix: "%"
+
+      # -------------------------------------------------------------------------
+      # 52-Wochen Bereiche
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📊 52-Wochen Bereiche
+        show_header_toggle: false
+        entities:
+          - type: section
+            label: Apple (AAPL)
+          - entity: sensor.aapl_price
+            type: attribute
+            attribute: 52_week_low
+            name: 52W Tief
+            icon: mdi:arrow-down-bold
+          - entity: sensor.aapl_price
+            name: Aktuell
+            icon: mdi:circle
+          - entity: sensor.aapl_price
+            type: attribute
+            attribute: 52_week_high
+            name: 52W Hoch
+            icon: mdi:arrow-up-bold
+            
+          - type: section
+            label: Microsoft (MSFT)
+          - entity: sensor.msft_price
+            type: attribute
+            attribute: 52_week_low
+            name: 52W Tief
+            icon: mdi:arrow-down-bold
+          - entity: sensor.msft_price
+            name: Aktuell
+            icon: mdi:circle
+          - entity: sensor.msft_price
+            type: attribute
+            attribute: 52_week_high
+            name: 52W Hoch
+            icon: mdi:arrow-up-bold
+
+
+  # ===========================================================================
+  # VIEW 3: WATCHLIST
+  # ===========================================================================
+  - title: Watchlist
+    path: watchlist
+    icon: mdi:eye
+    cards:
+    
+      - type: markdown
+        content: |
+          # 👁️ Watchlist
+          
+          Aktien die du im Auge behältst, aber (noch) nicht besitzt.
+          
+      # -------------------------------------------------------------------------
+      # Mini-Cards für Watchlist
+      # -------------------------------------------------------------------------
+      - type: grid
+        columns: 3
+        square: false
+        cards:
+        
+          - type: custom:stock-tracker-card
+            entity: sensor.nvda_price
+            display_mode: mini
+            
+          - type: custom:stock-tracker-card
+            entity: sensor.amd_price
+            display_mode: mini
+            
+          - type: custom:stock-tracker-card
+            entity: sensor.meta_price
+            display_mode: mini
+            
+          - type: custom:stock-tracker-card
+            entity: sensor.nflx_price
+            display_mode: mini
+            
+          - type: custom:stock-tracker-card
+            entity: sensor.dis_price
+            display_mode: mini
+            
+          - type: custom:stock-tracker-card
+            entity: sensor.v_price
+            display_mode: mini
+
+      # -------------------------------------------------------------------------
+      # Watchlist als einfache Liste
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: Alle Watchlist Aktien
+        show_header_toggle: false
+        entities:
+          - entity: sensor.nvda_price
+            name: NVIDIA
+            secondary_info: last-updated
+          - entity: sensor.amd_price
+            name: AMD
+            secondary_info: last-updated
+          - entity: sensor.meta_price
+            name: Meta (Facebook)
+            secondary_info: last-updated
+          - entity: sensor.nflx_price
+            name: Netflix
+            secondary_info: last-updated
+          - entity: sensor.dis_price
+            name: Disney
+            secondary_info: last-updated
+          - entity: sensor.v_price
+            name: Visa
+            secondary_info: last-updated
+
+
+  # ===========================================================================
+  # VIEW 4: INDIZES & MÄRKTE
+  # ===========================================================================
+  - title: Märkte
+    path: markets
+    icon: mdi:earth
+    cards:
+    
+      - type: markdown
+        content: |
+          # 🌍 Märkte & Indizes
+          
+          Überblick über wichtige Marktindizes und Währungen.
+
+      # -------------------------------------------------------------------------
+      # Wichtige Indizes
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 📊 Indizes
+        show_header_toggle: false
+        entities:
+          - type: section
+            label: "🇺🇸 USA"
+          - entity: sensor.gspc_price
+            name: S&P 500
+            icon: mdi:chart-line
+          - entity: sensor.dji_price
+            name: Dow Jones
+            icon: mdi:chart-line
+          - entity: sensor.ixic_price
+            name: NASDAQ
+            icon: mdi:chart-line
+            
+          - type: section
+            label: "🇩🇪 Deutschland"
+          - entity: sensor.gdaxi_price
+            name: DAX 40
+            icon: mdi:chart-line
+            
+          - type: section
+            label: "🌍 International"
+          - entity: sensor.ftse_price
+            name: FTSE 100
+            icon: mdi:chart-line
+          - entity: sensor.n225_price
+            name: Nikkei 225
+            icon: mdi:chart-line
+
+      # -------------------------------------------------------------------------
+      # Währungen
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 💱 Währungen
+        show_header_toggle: false
+        entities:
+          - entity: sensor.eurusd_x_price
+            name: EUR/USD
+            icon: mdi:currency-eur
+          - entity: sensor.gbpusd_x_price
+            name: GBP/USD
+            icon: mdi:currency-gbp
+          - entity: sensor.usdjpy_x_price
+            name: USD/JPY
+            icon: mdi:currency-jpy
+          - entity: sensor.usdchf_x_price
+            name: USD/CHF
+            icon: mdi:currency-sign
+
+      # -------------------------------------------------------------------------
+      # Krypto Markt
+      # -------------------------------------------------------------------------
+      - type: entities
+        title: 🪙 Krypto
+        show_header_toggle: false
+        entities:
+          - entity: sensor.btc_usd_price
+            name: Bitcoin
+            icon: mdi:bitcoin
+          - entity: sensor.eth_usd_price
+            name: Ethereum
+            icon: mdi:ethereum
+          - entity: sensor.bnb_usd_price
+            name: Binance Coin
+            icon: mdi:currency-usd
+          - entity: sensor.sol_usd_price
+            name: Solana
+            icon: mdi:currency-usd
+          - entity: sensor.ada_usd_price
+            name: Cardano
+            icon: mdi:currency-usd

@@ -1,0 +1,171 @@
+# =============================================================================
+# STOCK TRACKER - TÄGLICHER PORTFOLIO-REPORT
+# =============================================================================
+#
+# Sendet jeden Tag zu einer bestimmten Zeit einen Überblick über dein Portfolio.
+#
+# =============================================================================
+
+blueprint:
+  name: "📋 Stock Tracker - Täglicher Report"
+  description: |
+    Erhalte jeden Tag einen Überblick über dein Portfolio.
+    
+    **Enthält:**
+    - 📊 Alle Kurse und Tagesänderungen
+    - 🚀 Beste und schlechteste Performer
+    - 📈 Trend-Übersicht
+    - ⚡ Aktive Signale
+    
+    **Benötigt:** Stock Tracker Integration
+  domain: automation
+  author: "Stock Tracker"
+  
+  input:
+    report_time:
+      name: "🕐 Report-Zeit"
+      description: "Wann soll der tägliche Report gesendet werden?"
+      default: "18:00:00"
+      selector:
+        time:
+        
+    stock_sensors:
+      name: "📊 Aktien-Sensoren"
+      description: "Wähle alle Preis-Sensoren die im Report erscheinen sollen"
+      selector:
+        entity:
+          filter:
+            - integration: stock_tracker
+              domain: sensor
+          multiple: true
+          
+    notify_device:
+      name: "📱 Benachrichtigungs-Gerät"
+      description: "Mobilgerät für den Report"
+      default: ""
+      selector:
+        device:
+          filter:
+            - integration: mobile_app
+          multiple: false
+          
+    only_on_weekdays:
+      name: "📅 Nur an Wochentagen"
+      description: "Report nur Mo-Fr senden (Börsentage)"
+      default: true
+      selector:
+        boolean:
+
+
+# =============================================================================
+# VARIABLEN
+# =============================================================================
+
+variables:
+  sensors: !input stock_sensors
+  
+  report_content: >
+    {% set ns = namespace(
+      total_change=0,
+      best_symbol='',
+      best_change=-999,
+      worst_symbol='',
+      worst_change=999,
+      lines=[]
+    ) %}
+    
+    {% for sensor in sensors %}
+      {% set symbol = state_attr(sensor, 'symbol') or sensor.split('.')[1].split('_')[0] | upper %}
+      {% set price = states(sensor) | float(0) %}
+      {% set change = state_attr(sensor, 'change_percent') | float(0) %}
+      {% set currency = state_attr(sensor, 'currency') or 'USD' %}
+      
+      {% set emoji = '📈' if change >= 0 else '📉' %}
+      {% set sign = '+' if change >= 0 else '' %}
+      
+      {% set line = emoji ~ ' **' ~ symbol ~ ':** ' ~ price ~ ' ' ~ currency ~ ' (' ~ sign ~ change | round(2) ~ '%)' %}
+      {% set ns.lines = ns.lines + [line] %}
+      
+      {% set ns.total_change = ns.total_change + change %}
+      
+      {% if change > ns.best_change %}
+        {% set ns.best_change = change %}
+        {% set ns.best_symbol = symbol %}
+      {% endif %}
+      
+      {% if change < ns.worst_change %}
+        {% set ns.worst_change = change %}
+        {% set ns.worst_symbol = symbol %}
+      {% endif %}
+    {% endfor %}
+    
+    {% set avg_change = (ns.total_change / (sensors | length)) | round(2) %}
+    {% set overall_emoji = '🟢' if avg_change >= 0 else '🔴' %}
+    
+    📊 **Täglicher Portfolio Report**
+    _{{ now().strftime('%d.%m.%Y') }}_
+    
+    ---
+    {{ ns.lines | join('\n') }}
+    ---
+    
+    {{ overall_emoji }} **Durchschnitt:** {{ '+' if avg_change >= 0 else '' }}{{ avg_change }}%
+    
+    🏆 **Bester:** {{ ns.best_symbol }} (+{{ ns.best_change | round(2) }}%)
+    💔 **Schlechtester:** {{ ns.worst_symbol }} ({{ ns.worst_change | round(2) }}%)
+
+
+# =============================================================================
+# TRIGGER
+# =============================================================================
+
+trigger:
+  - platform: time
+    at: !input report_time
+
+
+# =============================================================================
+# BEDINGUNGEN
+# =============================================================================
+
+condition:
+  - condition: or
+    conditions:
+      - condition: template
+        value_template: "{{ not only_on_weekdays }}"
+      - condition: time
+        weekday:
+          - mon
+          - tue
+          - wed
+          - thu
+          - fri
+
+
+# =============================================================================
+# AKTIONEN
+# =============================================================================
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_device != '' }}"
+        sequence:
+          - service: notify.mobile_app_{{ device_attr(notify_device, 'name') | slugify }}
+            data:
+              title: "📋 Portfolio Report"
+              message: "{{ report_content }}"
+              data:
+                tag: "daily_report"
+                group: "Stock Reports"
+                channel: "Daily Report"
+                
+  - service: persistent_notification.create
+    data:
+      title: "📋 Täglicher Portfolio Report"
+      message: "{{ report_content }}"
+      notification_id: "daily_stock_report"
+
+
+mode: single
