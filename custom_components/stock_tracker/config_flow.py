@@ -351,9 +351,10 @@ class StockTrackerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
-    ) -> StockTrackerOptionsFlow:
+    ) -> config_entries.OptionsFlow:
         """Get the options flow handler."""
-        return StockTrackerOptionsFlow(config_entry)
+        # WICHTIG: Keine config_entry übergeben - wird automatisch gesetzt!
+        return StockTrackerOptionsFlow()
 
 
 # =============================================================================
@@ -363,9 +364,10 @@ class StockTrackerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class StockTrackerOptionsFlow(config_entries.OptionsFlow):
     """Handle options flow for Stock Tracker."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        # WICHTIG: self.config_entry NICHT setzen!
+        # Es ist eine read-only Property die automatisch verfügbar ist.
         self._search_results: list[dict] = []
 
     # -------------------------------------------------------------------------
@@ -375,6 +377,7 @@ class StockTrackerOptionsFlow(config_entries.OptionsFlow):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Show the main options menu."""
+        # self.config_entry ist hier automatisch verfügbar
         current_symbols = self.config_entry.data.get(CONF_SYMBOLS, [])
         symbol_count = len(current_symbols)
 

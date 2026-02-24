@@ -1394,3 +1394,34 @@ StockTrackerCard.getStubConfig = function() {
     show_indicators: true,
   };
 };
+
+// =============================================================================
+// REGISTER CUSTOM ELEMENTS
+// =============================================================================
+
+// Card registrieren
+if (!customElements.get('stock-tracker-card')) {
+  customElements.define('stock-tracker-card', StockTrackerCard);
+  console.info(
+    '%c 📊 STOCK-TRACKER-CARD %c v1.2.1 ',
+    'color: white; background: #1976d2; font-weight: bold; border-radius: 3px 0 0 3px;',
+    'color: #1976d2; background: white; font-weight: bold; border-radius: 0 3px 3px 0;'
+  );
+}
+
+// Editor registrieren
+if (!customElements.get('stock-tracker-card-editor')) {
+  customElements.define('stock-tracker-card-editor', StockTrackerCardEditor);
+}
+
+// Für Lovelace Card Picker (Auto-Discovery)
+window.customCards = window.customCards || [];
+if (!window.customCards.find(c => c.type === 'stock-tracker-card')) {
+  window.customCards.push({
+    type: 'stock-tracker-card',
+    name: 'Stock Tracker Card',
+    description: 'Zeigt Aktienkurse mit Preis, Änderung, Trend und technischen Indikatoren',
+    preview: true,
+    documentationURL: 'https://github.com/richieam93/ha-stock-tracker',
+  });
+}
