@@ -29,7 +29,6 @@ class StockTrackerCard extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = {};
     this._hass = null;
-    this._resizeObserver = null;
   }
 
   set hass(hass) {
@@ -74,7 +73,7 @@ class StockTrackerCard extends HTMLElement {
 
     const entity = this._hass.states[this._config.entity];
     if (!entity) {
-      this._renderError(`Entity not found: ${this._config.entity}`);
+      this._renderError(`Entity nicht gefunden: ${this._config.entity}`);
       return;
     }
 
@@ -124,27 +123,22 @@ class StockTrackerCard extends HTMLElement {
       sector: attrs.sector || '',
       dataSource: attrs.data_source || '',
       signal: attrs.overall_signal || 'N/A',
-      // Trend data
       trendDirection: attrs.trend_direction || 'neutral',
       trendStrength: attrs.trend_strength || 0,
       volatility: attrs.volatility || 0,
-      // Indicators
       rsi: attrs.rsi_14,
       rsiSignal: attrs.rsi_signal,
       macdTrend: attrs.macd_trend,
-      // Period changes
       weekChange: attrs.week_change_percent,
       monthChange: attrs.month_change_percent,
       ytdChange: attrs.ytd_change_percent,
-      // Last updated
       lastUpdated: entity.last_updated
     };
   }
 
   _extractSymbol(entityId) {
-    // sensor.aapl_price -> AAPL
     const match = entityId.match(/sensor\.(.+)_price/);
-    return match ? match[1].toUpperCase() : entityId;
+    return match ? match[1].toUpperCase().replace(/_/g, '.') : entityId;
   }
 
   // =========================================================================
@@ -152,12 +146,12 @@ class StockTrackerCard extends HTMLElement {
   // =========================================================================
 
   _renderMini(data) {
-    const color = data.isPositive ? 'var(--success-color, #4CAF50)' : 'var(--error-color, #F44336)';
+    const color = data.isPositive ? '#4CAF50' : '#F44336';
     const arrow = data.isPositive ? '▲' : '▼';
 
     this.shadowRoot.innerHTML = `
       <style>${this._getMiniStyles()}</style>
-      <ha-card class="mini-card" @click="${() => this._handleClick()}">
+      <ha-card class="mini-card">
         <div class="mini-content">
           <span class="symbol">${data.symbol}</span>
           <span class="price">${this._formatPrice(data.price, data.currency)}</span>
@@ -172,14 +166,14 @@ class StockTrackerCard extends HTMLElement {
   }
 
   _renderCompact(data) {
-    const color = data.isPositive ? 'var(--success-color, #4CAF50)' : 'var(--error-color, #F44336)';
+    const color = data.isPositive ? '#4CAF50' : '#F44336';
     const arrow = data.isPositive ? '▲' : '▼';
     const trendIcon = this._getTrendIcon(data.trendDirection);
 
     this.shadowRoot.innerHTML = `
       <style>${this._getCompactStyles()}</style>
       <ha-card class="compact-card">
-        <div class="header" @click="${() => this._handleClick()}">
+        <div class="header">
           <div class="title-row">
             <span class="symbol">${data.symbol}</span>
             <span class="exchange">${data.exchange}</span>
@@ -223,7 +217,7 @@ class StockTrackerCard extends HTMLElement {
   }
 
   _renderFull(data) {
-    const color = data.isPositive ? 'var(--success-color, #4CAF50)' : 'var(--error-color, #F44336)';
+    const color = data.isPositive ? '#4CAF50' : '#F44336';
     const bgColor = data.isPositive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)';
     const arrow = data.isPositive ? '▲' : '▼';
     const trendIcon = this._getTrendIcon(data.trendDirection);
@@ -232,7 +226,7 @@ class StockTrackerCard extends HTMLElement {
       <style>${this._getFullStyles()}</style>
       <ha-card class="full-card">
         <!-- Header -->
-        <div class="header" @click="${() => this._handleClick()}">
+        <div class="header">
           <div class="header-left">
             <div class="symbol-badge">${data.symbol}</div>
             <div class="company-info">
@@ -262,9 +256,6 @@ class StockTrackerCard extends HTMLElement {
             </span>
           </div>
         </div>
-
-        <!-- Chart Placeholder / Sparkline -->
-        ${this._config.show_chart ? this._renderSparkline(data) : ''}
 
         <!-- Day Stats -->
         <div class="stats-grid">
@@ -336,17 +327,6 @@ class StockTrackerCard extends HTMLElement {
   // RENDER COMPONENTS
   // =========================================================================
 
-  _renderSparkline(data) {
-    return `
-      <div class="sparkline-container">
-        <div class="sparkline-placeholder">
-          <span class="sparkline-text">📈 Kursverlauf</span>
-          <span class="sparkline-hint">Nutze history-graph für Details</span>
-        </div>
-      </div>
-    `;
-  }
-
   _render52WeekRange(data) {
     const low = data.week52Low;
     const high = data.week52High;
@@ -386,7 +366,7 @@ class StockTrackerCard extends HTMLElement {
         <div class="performance-grid">
           ${periods.map(p => {
             const isPositive = p.value >= 0;
-            const color = isPositive ? 'var(--success-color, #4CAF50)' : 'var(--error-color, #F44336)';
+            const color = isPositive ? '#4CAF50' : '#F44336';
             return `
               <div class="perf-item">
                 <span class="perf-label">${p.label}</span>
@@ -418,12 +398,7 @@ class StockTrackerCard extends HTMLElement {
               </span>
             </div>
             <div class="rsi-bar">
-              <div class="rsi-fill" style="width: ${data.rsi}%"></div>
-              <div class="rsi-zones">
-                <div class="zone oversold"></div>
-                <div class="zone neutral"></div>
-                <div class="zone overbought"></div>
-              </div>
+              <div class="rsi-fill" style="width: ${Math.min(100, data.rsi)}%"></div>
             </div>
           </div>
           ` : ''}
@@ -454,13 +429,39 @@ class StockTrackerCard extends HTMLElement {
       <style>
         .error-card {
           padding: 16px;
-          background: var(--card-background-color);
-          border-radius: var(--ha-card-border-radius, 4px);
+          background: var(--card-background-color, #fff);
+          border-radius: var(--ha-card-border-radius, 12px);
+          border: 1px solid var(--error-color, #F44336);
+        }
+        .error-content {
+          display: flex;
+          align-items: center;
+          gap: 12px;
           color: var(--error-color, #F44336);
+        }
+        .error-icon {
+          font-size: 24px;
+        }
+        .error-text {
+          flex: 1;
+        }
+        .error-title {
+          font-weight: bold;
+          margin-bottom: 4px;
+        }
+        .error-message {
+          font-size: 12px;
+          opacity: 0.8;
         }
       </style>
       <ha-card class="error-card">
-        ⚠️ ${message}
+        <div class="error-content">
+          <span class="error-icon">⚠️</span>
+          <div class="error-text">
+            <div class="error-title">Fehler</div>
+            <div class="error-message">${message}</div>
+          </div>
+        </div>
       </ha-card>
     `;
   }
@@ -481,7 +482,7 @@ class StockTrackerCard extends HTMLElement {
       }
       .mini-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        box-shadow: var(--ha-card-box-shadow, 0 4px 8px rgba(0,0,0,0.2));
       }
       .mini-content {
         display: flex;
@@ -511,11 +512,11 @@ class StockTrackerCard extends HTMLElement {
         display: block;
       }
       .compact-card {
-        padding: 12px;
+        padding: 16px;
         cursor: pointer;
       }
       .header {
-        margin-bottom: 8px;
+        margin-bottom: 12px;
       }
       .title-row {
         display: flex;
@@ -528,14 +529,14 @@ class StockTrackerCard extends HTMLElement {
         color: var(--primary-text-color);
       }
       .exchange {
-        font-size: 12px;
+        font-size: 11px;
         color: var(--secondary-text-color);
-        background: var(--divider-color);
+        background: var(--secondary-background-color, #f5f5f5);
         padding: 2px 6px;
         border-radius: 4px;
       }
       .name {
-        font-size: 12px;
+        font-size: 13px;
         color: var(--secondary-text-color);
         margin-top: 4px;
         white-space: nowrap;
@@ -548,7 +549,7 @@ class StockTrackerCard extends HTMLElement {
       .price-main {
         display: flex;
         align-items: baseline;
-        gap: 4px;
+        gap: 6px;
       }
       .price {
         font-size: 28px;
@@ -572,29 +573,31 @@ class StockTrackerCard extends HTMLElement {
         display: flex;
         justify-content: space-between;
         padding-top: 12px;
-        border-top: 1px solid var(--divider-color);
+        border-top: 1px solid var(--divider-color, #e0e0e0);
       }
       .stat {
         text-align: center;
+        flex: 1;
       }
       .stat .label {
         display: block;
         font-size: 10px;
         color: var(--secondary-text-color);
         text-transform: uppercase;
+        margin-bottom: 2px;
       }
       .stat .value {
-        font-size: 14px;
-        font-weight: 500;
+        font-size: 13px;
+        font-weight: 600;
       }
       .signal-buy, .signal-strong-buy {
-        color: var(--success-color, #4CAF50);
+        color: #4CAF50;
       }
       .signal-sell, .signal-strong-sell {
-        color: var(--error-color, #F44336);
+        color: #F44336;
       }
       .signal-hold {
-        color: var(--warning-color, #FF9800);
+        color: #FF9800;
       }
     `;
   }
@@ -609,7 +612,6 @@ class StockTrackerCard extends HTMLElement {
         overflow: hidden;
       }
 
-      /* Header */
       .header {
         display: flex;
         justify-content: space-between;
@@ -622,50 +624,57 @@ class StockTrackerCard extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 12px;
+        flex: 1;
+        min-width: 0;
       }
       .symbol-badge {
-        background: var(--primary-color);
-        color: var(--text-primary-color, white);
+        background: var(--primary-color, #03a9f4);
+        color: white;
         padding: 8px 12px;
         border-radius: 8px;
         font-weight: bold;
-        font-size: 16px;
+        font-size: 14px;
+        flex-shrink: 0;
       }
       .company-info {
         display: flex;
         flex-direction: column;
+        min-width: 0;
       }
       .company-name {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 500;
         color: var(--primary-text-color);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .exchange-info {
         font-size: 12px;
         color: var(--secondary-text-color);
       }
       .trend-badge {
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        font-weight: 500;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        white-space: nowrap;
       }
       .trend-strong_bullish, .trend-bullish {
-        background: rgba(76, 175, 80, 0.2);
-        color: var(--success-color, #4CAF50);
+        background: rgba(76, 175, 80, 0.15);
+        color: #4CAF50;
       }
       .trend-strong_bearish, .trend-bearish {
-        background: rgba(244, 67, 54, 0.2);
-        color: var(--error-color, #F44336);
+        background: rgba(244, 67, 54, 0.15);
+        color: #F44336;
       }
       .trend-neutral {
-        background: rgba(158, 158, 158, 0.2);
+        background: rgba(158, 158, 158, 0.15);
         color: var(--secondary-text-color);
       }
 
-      /* Price Section */
       .price-section {
-        padding: 16px;
+        padding: 20px 16px;
         text-align: center;
       }
       .price-main {
@@ -686,42 +695,18 @@ class StockTrackerCard extends HTMLElement {
       .price-change {
         margin-top: 8px;
         font-size: 16px;
-        font-weight: 500;
+        font-weight: 600;
       }
       .change-value {
         margin-right: 8px;
       }
 
-      /* Sparkline */
-      .sparkline-container {
-        padding: 8px 16px;
-        background: var(--secondary-background-color);
-      }
-      .sparkline-placeholder {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        padding: 16px;
-        border: 1px dashed var(--divider-color);
-        border-radius: 8px;
-      }
-      .sparkline-text {
-        font-size: 14px;
-        color: var(--secondary-text-color);
-      }
-      .sparkline-hint {
-        font-size: 10px;
-        color: var(--disabled-text-color);
-        margin-top: 4px;
-      }
-
-      /* Stats Grid */
       .stats-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: 1px;
-        background: var(--divider-color);
-        margin: 16px;
+        background: var(--divider-color, #e0e0e0);
+        margin: 0 16px 16px;
         border-radius: 8px;
         overflow: hidden;
       }
@@ -739,25 +724,24 @@ class StockTrackerCard extends HTMLElement {
       }
       .stat-value {
         font-size: 15px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--primary-text-color);
       }
       .stat-value.high {
-        color: var(--success-color, #4CAF50);
+        color: #4CAF50;
       }
       .stat-value.low {
-        color: var(--error-color, #F44336);
+        color: #F44336;
       }
 
-      /* Data Section */
       .data-section {
-        padding: 0 16px;
+        padding: 0 16px 16px;
       }
       .data-row {
         display: flex;
         justify-content: space-between;
         padding: 10px 0;
-        border-bottom: 1px solid var(--divider-color);
+        border-bottom: 1px solid var(--divider-color, #e0e0e0);
       }
       .data-row:last-child {
         border-bottom: none;
@@ -768,32 +752,31 @@ class StockTrackerCard extends HTMLElement {
       }
       .data-value {
         font-size: 13px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--primary-text-color);
       }
 
-      /* 52 Week Range */
       .range-section {
         padding: 16px;
-      }
-      .range-header {
-        margin-bottom: 12px;
+        background: var(--secondary-background-color, #f5f5f5);
       }
       .range-title {
         font-size: 12px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--secondary-text-color);
         text-transform: uppercase;
+        margin-bottom: 12px;
+        display: block;
       }
       .range-bar-container {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
       }
       .range-low, .range-high {
         font-size: 11px;
         color: var(--secondary-text-color);
-        min-width: 50px;
+        min-width: 55px;
       }
       .range-high {
         text-align: right;
@@ -801,49 +784,46 @@ class StockTrackerCard extends HTMLElement {
       .range-bar {
         flex: 1;
         height: 8px;
-        background: var(--divider-color);
+        background: var(--divider-color, #e0e0e0);
         border-radius: 4px;
         position: relative;
-        overflow: visible;
       }
       .range-fill {
         height: 100%;
-        background: linear-gradient(90deg, var(--error-color, #F44336), var(--warning-color, #FF9800), var(--success-color, #4CAF50));
+        background: linear-gradient(90deg, #F44336 0%, #FF9800 50%, #4CAF50 100%);
         border-radius: 4px;
       }
       .range-marker {
         position: absolute;
-        top: -4px;
-        width: 16px;
-        height: 16px;
-        background: var(--primary-color);
-        border: 2px solid var(--card-background-color);
+        top: 50%;
+        width: 14px;
+        height: 14px;
+        background: var(--primary-color, #03a9f4);
+        border: 2px solid white;
         border-radius: 50%;
-        transform: translateX(-50%);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        transform: translate(-50%, -50%);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
       }
 
-      /* Performance Section */
       .performance-section {
         padding: 16px;
-        background: var(--secondary-background-color);
       }
       .performance-header {
         font-size: 12px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--secondary-text-color);
         text-transform: uppercase;
         margin-bottom: 12px;
       }
       .performance-grid {
         display: flex;
-        gap: 16px;
+        gap: 12px;
       }
       .perf-item {
         flex: 1;
         text-align: center;
-        padding: 8px;
-        background: var(--card-background-color);
+        padding: 10px;
+        background: var(--secondary-background-color, #f5f5f5);
         border-radius: 8px;
       }
       .perf-label {
@@ -857,14 +837,13 @@ class StockTrackerCard extends HTMLElement {
         font-weight: bold;
       }
 
-      /* Indicators Section */
       .indicators-section {
         padding: 16px;
-        border-top: 1px solid var(--divider-color);
+        border-top: 1px solid var(--divider-color, #e0e0e0);
       }
       .indicators-header {
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--primary-text-color);
         margin-bottom: 12px;
       }
@@ -876,7 +855,7 @@ class StockTrackerCard extends HTMLElement {
       .indicator-item {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 6px;
       }
       .indicator-label {
         font-size: 12px;
@@ -885,124 +864,89 @@ class StockTrackerCard extends HTMLElement {
       .indicator-value-row {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 10px;
       }
       .indicator-value {
         font-size: 14px;
-        font-weight: 500;
+        font-weight: 600;
         color: var(--primary-text-color);
       }
       .indicator-signal {
         font-size: 11px;
-        padding: 2px 6px;
+        padding: 3px 8px;
         border-radius: 4px;
+        font-weight: 500;
       }
       .indicator-signal.oversold {
-        background: rgba(76, 175, 80, 0.2);
-        color: var(--success-color, #4CAF50);
+        background: rgba(76, 175, 80, 0.15);
+        color: #4CAF50;
       }
       .indicator-signal.neutral {
-        background: rgba(158, 158, 158, 0.2);
+        background: rgba(158, 158, 158, 0.15);
         color: var(--secondary-text-color);
       }
       .indicator-signal.overbought {
-        background: rgba(244, 67, 54, 0.2);
-        color: var(--error-color, #F44336);
+        background: rgba(244, 67, 54, 0.15);
+        color: #F44336;
       }
       .indicator-signal.macd-bullish {
-        background: rgba(76, 175, 80, 0.2);
-        color: var(--success-color, #4CAF50);
+        background: rgba(76, 175, 80, 0.15);
+        color: #4CAF50;
       }
       .indicator-signal.macd-bearish {
-        background: rgba(244, 67, 54, 0.2);
-        color: var(--error-color, #F44336);
+        background: rgba(244, 67, 54, 0.15);
+        color: #F44336;
       }
 
-      /* RSI Bar */
-      .rsi-bar {
-        position: relative;
+      .rsi-bar, .strength-bar {
         height: 6px;
-        background: var(--divider-color);
+        background: var(--divider-color, #e0e0e0);
         border-radius: 3px;
-        margin-top: 4px;
         overflow: hidden;
       }
       .rsi-fill {
         height: 100%;
-        background: var(--primary-color);
+        background: var(--primary-color, #03a9f4);
         border-radius: 3px;
-        transition: width 0.3s;
-      }
-      .rsi-zones {
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        display: flex;
-      }
-      .zone {
-        flex: 1;
-        opacity: 0.3;
-      }
-      .zone.oversold {
-        background: var(--success-color, #4CAF50);
-      }
-      .zone.neutral {
-        background: var(--warning-color, #FF9800);
-        flex: 2;
-      }
-      .zone.overbought {
-        background: var(--error-color, #F44336);
-      }
-
-      /* Strength Bar */
-      .strength-bar {
-        flex: 1;
-        height: 6px;
-        background: var(--divider-color);
-        border-radius: 3px;
-        margin: 4px 8px;
       }
       .strength-fill {
         height: 100%;
-        background: var(--primary-color);
+        background: var(--primary-color, #03a9f4);
         border-radius: 3px;
       }
 
-      /* Footer */
       .card-footer {
         display: flex;
         justify-content: space-between;
         align-items: center;
         padding: 12px 16px;
-        background: var(--secondary-background-color);
-        border-top: 1px solid var(--divider-color);
+        background: var(--secondary-background-color, #f5f5f5);
+        border-top: 1px solid var(--divider-color, #e0e0e0);
       }
       .data-source {
         font-size: 11px;
-        color: var(--disabled-text-color);
+        color: var(--disabled-text-color, #9e9e9e);
       }
       .signal-badge {
         font-size: 12px;
-        font-weight: 500;
-        padding: 4px 8px;
-        border-radius: 4px;
+        font-weight: 600;
+        padding: 4px 10px;
+        border-radius: 6px;
       }
       .signal-badge.signal-buy, .signal-badge.signal-strong-buy {
-        background: rgba(76, 175, 80, 0.2);
-        color: var(--success-color, #4CAF50);
+        background: rgba(76, 175, 80, 0.15);
+        color: #4CAF50;
       }
       .signal-badge.signal-sell, .signal-badge.signal-strong-sell {
-        background: rgba(244, 67, 54, 0.2);
-        color: var(--error-color, #F44336);
+        background: rgba(244, 67, 54, 0.15);
+        color: #F44336;
       }
       .signal-badge.signal-hold {
-        background: rgba(255, 152, 0, 0.2);
-        color: var(--warning-color, #FF9800);
+        background: rgba(255, 152, 0, 0.15);
+        color: #FF9800;
       }
       .signal-badge.signal-n-a {
-        background: var(--divider-color);
+        background: var(--secondary-background-color, #f5f5f5);
         color: var(--secondary-text-color);
       }
     `;
@@ -1015,27 +959,18 @@ class StockTrackerCard extends HTMLElement {
   _formatPrice(value, currency) {
     if (value === null || value === undefined || isNaN(value)) return 'N/A';
     
-    const formatter = new Intl.NumberFormat('de-DE', {
+    const symbols = { 'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CHF': 'CHF ' };
+    const symbol = symbols[currency] || currency + ' ';
+    
+    return symbol + new Intl.NumberFormat('de-DE', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
-    });
-    
-    const symbols = {
-      'USD': '$',
-      'EUR': '€',
-      'GBP': '£',
-      'JPY': '¥',
-      'CHF': 'CHF ',
-    };
-    
-    const symbol = symbols[currency] || currency + ' ';
-    return symbol + formatter.format(value);
+    }).format(value);
   }
 
   _formatVolume(value) {
     if (!value) return 'N/A';
     value = parseFloat(value);
-    
     if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
     if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
     if (value >= 1e3) return (value / 1e3).toFixed(1) + 'K';
@@ -1045,7 +980,6 @@ class StockTrackerCard extends HTMLElement {
   _formatLargeNumber(value) {
     if (!value) return 'N/A';
     value = parseFloat(value);
-    
     if (value >= 1e12) return (value / 1e12).toFixed(2) + 'T';
     if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
     if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
@@ -1065,11 +999,11 @@ class StockTrackerCard extends HTMLElement {
 
   _formatTrend(trend) {
     const labels = {
-      'strong_bullish': 'Stark steigend',
+      'strong_bullish': 'Stark ↑',
       'bullish': 'Steigend',
       'neutral': 'Seitwärts',
       'bearish': 'Fallend',
-      'strong_bearish': 'Stark fallend',
+      'strong_bearish': 'Stark ↓',
     };
     return labels[trend] || trend;
   }
@@ -1098,10 +1032,7 @@ class StockTrackerCard extends HTMLElement {
   }
 
   _handleClick() {
-    const event = new Event('hass-more-info', {
-      bubbles: true,
-      composed: true
-    });
+    const event = new Event('hass-more-info', { bubbles: true, composed: true });
     event.detail = { entityId: this._config.entity };
     this.dispatchEvent(event);
   }
@@ -1109,6 +1040,7 @@ class StockTrackerCard extends HTMLElement {
   _attachClickHandler() {
     const card = this.shadowRoot.querySelector('ha-card');
     if (card) {
+      card.style.cursor = 'pointer';
       card.addEventListener('click', () => this._handleClick());
     }
   }
@@ -1124,7 +1056,7 @@ class StockTrackerCard extends HTMLElement {
   static getStubConfig() {
     return {
       entity: '',
-      display_mode: 'full',
+      display_mode: 'compact',
       show_chart: true,
       show_indicators: true
     };
@@ -1133,7 +1065,7 @@ class StockTrackerCard extends HTMLElement {
 
 
 // =============================================================================
-// CARD EDITOR MIT AUTO-DISCOVER
+// CARD EDITOR - KOMPLETT NEU GESCHRIEBEN
 // =============================================================================
 
 class StockTrackerCardEditor extends HTMLElement {
@@ -1145,7 +1077,7 @@ class StockTrackerCardEditor extends HTMLElement {
   }
 
   setConfig(config) {
-    this._config = config;
+    this._config = { ...config };
     this._render();
   }
 
@@ -1155,54 +1087,54 @@ class StockTrackerCardEditor extends HTMLElement {
   }
 
   _getStockEntities() {
-    /**
-     * Automatisch alle Stock Tracker Sensoren finden.
-     * Sucht nach sensor.*_price Entities die zur Integration gehören.
-     */
-    if (!this._hass) return [];
+    if (!this._hass || !this._hass.states) return [];
 
     const entities = [];
-    const states = this._hass.states;
 
-    for (const entityId of Object.keys(states)) {
-      // Suche nach Preis-Sensoren
-      if (entityId.startsWith('sensor.') && entityId.endsWith('_price')) {
-        const state = states[entityId];
-        const attrs = state.attributes || {};
+    for (const [entityId, state] of Object.entries(this._hass.states)) {
+      // Nur Sensoren die mit _price enden
+      if (!entityId.startsWith('sensor.') || !entityId.endsWith('_price')) {
+        continue;
+      }
 
-        // Prüfe ob es ein Stock Tracker Sensor ist
-        const isStockSensor = (
-          attrs.symbol !== undefined ||
-          attrs.data_source !== undefined ||
-          attrs.change_percent !== undefined ||
-          attrs.market_cap !== undefined ||
-          attrs.pe_ratio !== undefined
-        );
+      const attrs = state.attributes || {};
+      
+      // Prüfe ob es ein Stock Tracker Sensor ist
+      const isStockSensor = (
+        attrs.symbol !== undefined ||
+        attrs.company_name !== undefined ||
+        attrs.change_percent !== undefined ||
+        attrs.previous_close !== undefined ||
+        attrs.exchange !== undefined
+      );
 
-        if (isStockSensor) {
-          const symbol = attrs.symbol || entityId.replace('sensor.', '').replace('_price', '').toUpperCase();
-          const name = attrs.company_name || symbol;
-          const price = state.state;
-          const currency = attrs.currency || 'USD';
-          const change = attrs.change_percent;
+      if (isStockSensor || entityId.includes('_price')) {
+        const symbol = attrs.symbol || 
+          entityId.replace('sensor.', '').replace('_price', '').toUpperCase();
+        const name = attrs.company_name || symbol;
+        const price = state.state;
+        const currency = attrs.currency || 'USD';
+        const change = attrs.change_percent;
 
-          let label = `${symbol} - ${name}`;
-          if (price && price !== 'unavailable') {
-            label += ` (${price} ${currency}`;
-            if (change !== undefined) {
-              const sign = change >= 0 ? '+' : '';
-              label += ` ${sign}${parseFloat(change).toFixed(2)}%`;
-            }
-            label += ')';
-          }
-
-          entities.push({
-            id: entityId,
-            symbol: symbol,
-            name: name,
-            label: label,
-          });
+        let label = `${symbol}`;
+        if (name && name !== symbol) {
+          label += ` - ${name}`;
         }
+        if (price && price !== 'unavailable' && price !== 'unknown') {
+          label += ` (${price} ${currency}`;
+          if (change !== undefined && change !== null) {
+            const sign = parseFloat(change) >= 0 ? '+' : '';
+            label += `, ${sign}${parseFloat(change).toFixed(2)}%`;
+          }
+          label += ')';
+        }
+
+        entities.push({
+          id: entityId,
+          symbol: symbol,
+          name: name,
+          label: label,
+        });
       }
     }
 
@@ -1212,129 +1144,146 @@ class StockTrackerCardEditor extends HTMLElement {
   }
 
   _render() {
-    if (!this._hass) return;
-
     const stockEntities = this._getStockEntities();
     const currentEntity = this._config.entity || '';
-
-    // Options für Dropdown bauen
-    let optionsHtml = '<option value="">-- Aktie auswählen --</option>';
-    for (const entity of stockEntities) {
-      const selected = entity.id === currentEntity ? 'selected' : '';
-      optionsHtml += `<option value="${entity.id}" ${selected}>${entity.label}</option>`;
-    }
-
-    // Falls aktuelle Entity nicht in der Liste ist
-    if (currentEntity && !stockEntities.find(e => e.id === currentEntity)) {
-      optionsHtml += `<option value="${currentEntity}" selected>${currentEntity}</option>`;
-    }
+    const currentMode = this._config.display_mode || 'compact';
+    const showIndicators = this._config.show_indicators !== false;
+    const showChart = this._config.show_chart !== false;
+    const customName = this._config.name || '';
 
     this.shadowRoot.innerHTML = `
       <style>
         .editor {
-          padding: 16px;
           display: flex;
           flex-direction: column;
           gap: 16px;
+          padding: 16px;
         }
         .field {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 6px;
         }
-        label {
+        .field label {
           font-weight: 500;
           font-size: 14px;
           color: var(--primary-text-color);
         }
-        .hint {
-          font-size: 12px;
+        .field .hint {
+          font-size: 11px;
           color: var(--secondary-text-color);
         }
-        select, input {
+        select, input[type="text"] {
           width: 100%;
-          padding: 10px;
-          border: 1px solid var(--divider-color);
+          padding: 10px 12px;
+          border: 1px solid var(--divider-color, #e0e0e0);
           border-radius: 8px;
-          background: var(--card-background-color);
+          background: var(--card-background-color, white);
           color: var(--primary-text-color);
           font-size: 14px;
+          box-sizing: border-box;
         }
         select:focus, input:focus {
           outline: none;
-          border-color: var(--primary-color);
+          border-color: var(--primary-color, #03a9f4);
         }
-        .checkbox-field {
+        .checkbox-row {
           display: flex;
           align-items: center;
-          gap: 8px;
+          gap: 10px;
+          padding: 8px 0;
         }
-        .checkbox-field input {
-          width: auto;
+        .checkbox-row input[type="checkbox"] {
+          width: 18px;
+          height: 18px;
+          cursor: pointer;
+        }
+        .checkbox-row label {
+          font-size: 14px;
+          color: var(--primary-text-color);
+          cursor: pointer;
         }
         .info-box {
-          background: var(--secondary-background-color);
+          background: var(--info-color, #2196F3);
+          background: rgba(33, 150, 243, 0.1);
+          border: 1px solid rgba(33, 150, 243, 0.3);
           border-radius: 8px;
           padding: 12px;
           font-size: 12px;
+          color: var(--primary-text-color);
+        }
+        .info-box strong {
+          color: var(--primary-color, #03a9f4);
+        }
+        .no-entities {
+          text-align: center;
+          padding: 20px;
           color: var(--secondary-text-color);
         }
-        .entity-count {
-          font-size: 12px;
-          color: var(--secondary-text-color);
-          margin-top: -8px;
+        .no-entities .icon {
+          font-size: 32px;
+          margin-bottom: 8px;
         }
       </style>
       
       <div class="editor">
-        <div class="field">
-          <label>📊 Aktie auswählen</label>
-          <select id="entity">
-            ${optionsHtml}
-          </select>
-          <span class="entity-count">${stockEntities.length} Aktien verfügbar</span>
-        </div>
+        ${stockEntities.length === 0 ? `
+          <div class="no-entities">
+            <div class="icon">📊</div>
+            <div>Keine Aktien-Sensoren gefunden.</div>
+            <div style="margin-top: 8px; font-size: 12px;">
+              Füge zuerst Aktien über Stock Tracker hinzu:<br>
+              Einstellungen → Geräte & Dienste → Stock Tracker
+            </div>
+          </div>
+        ` : `
+          <div class="field">
+            <label>📊 Aktie auswählen</label>
+            <select id="entity">
+              <option value="">-- Bitte wählen --</option>
+              ${stockEntities.map(e => `
+                <option value="${e.id}" ${e.id === currentEntity ? 'selected' : ''}>
+                  ${e.label}
+                </option>
+              `).join('')}
+            </select>
+            <span class="hint">${stockEntities.length} Aktien verfügbar</span>
+          </div>
 
-        <div class="field">
-          <label>🎨 Anzeige-Modus</label>
-          <select id="display_mode">
-            <option value="full" ${this._config.display_mode === 'full' ? 'selected' : ''}>
-              Vollständig (alle Details)
-            </option>
-            <option value="compact" ${this._config.display_mode === 'compact' ? 'selected' : ''}>
-              Kompakt (Kurs + Änderung)
-            </option>
-            <option value="mini" ${this._config.display_mode === 'mini' ? 'selected' : ''}>
-              Mini (nur eine Zeile)
-            </option>
-          </select>
-        </div>
+          <div class="field">
+            <label>🎨 Anzeige-Modus</label>
+            <select id="display_mode">
+              <option value="full" ${currentMode === 'full' ? 'selected' : ''}>
+                Vollständig - Alle Details
+              </option>
+              <option value="compact" ${currentMode === 'compact' ? 'selected' : ''}>
+                Kompakt - Kurs + Änderung
+              </option>
+              <option value="mini" ${currentMode === 'mini' ? 'selected' : ''}>
+                Mini - Nur eine Zeile
+              </option>
+            </select>
+          </div>
 
-        <div class="field checkbox-field">
-          <input type="checkbox"
-                 id="show_indicators"
-                 ${this._config.show_indicators !== false ? 'checked' : ''}>
-          <label for="show_indicators">📈 Technische Indikatoren anzeigen</label>
-        </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="show_indicators" ${showIndicators ? 'checked' : ''}>
+            <label for="show_indicators">📈 Technische Indikatoren anzeigen</label>
+          </div>
 
-        <div class="field checkbox-field">
-          <input type="checkbox"
-                 id="show_chart"
-                 ${this._config.show_chart !== false ? 'checked' : ''}>
-          <label for="show_chart">📉 Chart-Bereich anzeigen</label>
-        </div>
+          <div class="checkbox-row">
+            <input type="checkbox" id="show_chart" ${showChart ? 'checked' : ''}>
+            <label for="show_chart">📉 Chart-Bereich anzeigen</label>
+          </div>
 
-        <div class="field">
-          <label>Eigener Name (optional)</label>
-          <input type="text"
-                 id="name"
-                 value="${this._config.name || ''}"
-                 placeholder="z.B. Meine Apple Aktie">
-        </div>
+          <div class="field">
+            <label>Eigener Name (optional)</label>
+            <input type="text" id="name" value="${customName}" placeholder="z.B. Meine Apple Aktie">
+          </div>
+        `}
 
         <div class="info-box">
-          💡 <strong>Tipp:</strong> Füge weitere Aktien hinzu unter:<br>
-          Einstellungen → Geräte & Dienste → Stock Tracker → Konfigurieren
+          💡 <strong>Tipp:</strong> Weitere Aktien hinzufügen unter:<br>
+          Einstellungen → Geräte & Dienste → Stock Tracker → <strong>Konfigurieren</strong>
         </div>
       </div>
     `;
@@ -1342,20 +1291,27 @@ class StockTrackerCardEditor extends HTMLElement {
     // Event Listeners
     this.shadowRoot.querySelectorAll('select, input').forEach(el => {
       el.addEventListener('change', (e) => this._valueChanged(e));
+      if (el.type === 'text') {
+        el.addEventListener('input', (e) => this._valueChanged(e));
+      }
     });
   }
 
   _valueChanged(e) {
+    if (!this._config) return;
+
     const target = e.target;
-    let value = target.type === 'checkbox' ? target.checked : target.value;
+    const value = target.type === 'checkbox' ? target.checked : target.value;
 
     const newConfig = { ...this._config };
-    newConfig[target.id] = value;
 
-    // Leere Werte entfernen
-    if (value === '' || value === false) {
-      if (target.id === 'name') delete newConfig.name;
+    if (value === '' && target.id === 'name') {
+      delete newConfig.name;
+    } else {
+      newConfig[target.id] = value;
     }
+
+    this._config = newConfig;
 
     const event = new CustomEvent('config-changed', {
       detail: { config: newConfig },
@@ -1367,54 +1323,24 @@ class StockTrackerCardEditor extends HTMLElement {
 }
 
 
-// Auch getStubConfig aktualisieren
-// In der StockTrackerCard Klasse, ersetze getStubConfig:
-
-StockTrackerCard.getStubConfig = function() {
-  // Versuche den ersten verfügbaren Stock-Sensor zu finden
-  const states = document.querySelector('home-assistant')
-    ?.__hass?.states || {};
-  
-  let defaultEntity = '';
-  
-  for (const entityId of Object.keys(states)) {
-    if (entityId.startsWith('sensor.') && entityId.endsWith('_price')) {
-      const attrs = states[entityId].attributes || {};
-      if (attrs.symbol || attrs.data_source || attrs.change_percent !== undefined) {
-        defaultEntity = entityId;
-        break;
-      }
-    }
-  }
-  
-  return {
-    entity: defaultEntity,
-    display_mode: 'compact',
-    show_chart: true,
-    show_indicators: true,
-  };
-};
-
 // =============================================================================
 // REGISTER CUSTOM ELEMENTS
 // =============================================================================
 
-// Card registrieren
 if (!customElements.get('stock-tracker-card')) {
   customElements.define('stock-tracker-card', StockTrackerCard);
   console.info(
     '%c 📊 STOCK-TRACKER-CARD %c v1.2.1 ',
-    'color: white; background: #1976d2; font-weight: bold; border-radius: 3px 0 0 3px;',
-    'color: #1976d2; background: white; font-weight: bold; border-radius: 0 3px 3px 0;'
+    'color: white; background: #1976d2; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;',
+    'color: #1976d2; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0; border: 1px solid #1976d2;'
   );
 }
 
-// Editor registrieren
 if (!customElements.get('stock-tracker-card-editor')) {
   customElements.define('stock-tracker-card-editor', StockTrackerCardEditor);
 }
 
-// Für Lovelace Card Picker (Auto-Discovery)
+// Für Lovelace Card Picker
 window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === 'stock-tracker-card')) {
   window.customCards.push({
