@@ -19,7 +19,7 @@
 
 ---
 
-![Stock Tracker Card](Bilder/card.JPG)
+![Stock Tracker Card](Bilder/card-2.JPG.JPG)
 
 </div>
 
