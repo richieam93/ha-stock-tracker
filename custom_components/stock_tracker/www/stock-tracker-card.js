@@ -1,29 +1,9 @@
 /**
  * Stock Tracker Card for Home Assistant
- * 
- * A custom Lovelace card to display stock data beautifully.
- * 
- * Features:
- * - Compact and full display modes
- * - Live price with color-coded changes
- * - Mini sparkline chart
- * - Technical indicators display
- * - Trend visualization
- * - Click to show more details
- * 
- * Usage:
- *   type: custom:stock-tracker-card
- *   entity: sensor.aapl_price
- *   display_mode: full  # full | compact | mini
- *   show_chart: true
- *   show_indicators: true
+ * Version 2.0 - Erweiterte Konfiguration
  */
 
 class StockTrackerCard extends HTMLElement {
-  // =========================================================================
-  // LIFECYCLE
-  // =========================================================================
-
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
@@ -38,18 +18,53 @@ class StockTrackerCard extends HTMLElement {
 
   setConfig(config) {
     if (!config.entity) {
-      throw new Error('Please define an entity');
+      throw new Error('Bitte eine Entity auswählen');
     }
     
+    // Erweiterte Konfiguration mit allen Optionen
     this._config = {
+      // Pflicht
       entity: config.entity,
+      
+      // Anzeige-Modus
       display_mode: config.display_mode || 'full',
-      show_chart: config.show_chart !== false,
-      show_indicators: config.show_indicators !== false,
-      show_details: config.show_details !== false,
+      
+      // Haupt-Optionen
       name: config.name || null,
-      chart_hours: config.chart_hours || 24,
-      tap_action: config.tap_action || 'more-info',
+      show_header: config.show_header !== false,
+      show_price: config.show_price !== false,
+      show_change: config.show_change !== false,
+      show_trend: config.show_trend !== false,
+      
+      // Detail-Optionen
+      show_day_range: config.show_day_range !== false,
+      show_52_week_range: config.show_52_week_range !== false,
+      show_volume: config.show_volume !== false,
+      show_market_cap: config.show_market_cap ?? true,
+      show_pe_ratio: config.show_pe_ratio ?? true,
+      show_dividend: config.show_dividend ?? true,
+      
+      // Performance
+      show_performance: config.show_performance !== false,
+      
+      // Technische Analyse
+      show_indicators: config.show_indicators ?? true,
+      show_signal: config.show_signal !== false,
+      
+      // Footer
+      show_footer: config.show_footer !== false,
+      show_source: config.show_source ?? true,
+      show_last_update: config.show_last_update ?? false,
+      
+      // Styling
+      compact_numbers: config.compact_numbers ?? true,
+      color_positive: config.color_positive || '#4CAF50',
+      color_negative: config.color_negative || '#F44336',
+      color_neutral: config.color_neutral || '#9E9E9E',
+      
+      // Verstecke N/A Werte
+      hide_unavailable: config.hide_unavailable ?? true,
+      
       ...config
     };
 
@@ -63,10 +78,6 @@ class StockTrackerCard extends HTMLElement {
       default: return 4;
     }
   }
-
-  // =========================================================================
-  // RENDER
-  // =========================================================================
 
   _render() {
     if (!this._hass || !this._config.entity) return;
@@ -98,202 +109,362 @@ class StockTrackerCard extends HTMLElement {
     const changePercent = parseFloat(attrs.change_percent) || 0;
     
     return {
+      // Basis
       symbol: attrs.symbol || this._extractSymbol(this._config.entity),
-      name: this._config.name || attrs.company_name || attrs.symbol || 'Stock',
+      name: this._config.name || attrs.company_name || attrs.friendly_name || attrs.symbol || 'Unbekannt',
       price: price,
       currency: attrs.currency || 'USD',
+      exchange: attrs.exchange || '',
+      quoteType: attrs.quote_type || 'EQUITY',
+      
+      // Änderung
       change: change,
       changePercent: changePercent,
       isPositive: changePercent >= 0,
-      previousClose: parseFloat(attrs.previous_close) || 0,
-      open: parseFloat(attrs.today_open) || 0,
-      high: parseFloat(attrs.today_high) || 0,
-      low: parseFloat(attrs.today_low) || 0,
+      
+      // Tageswerte
+      previousClose: attrs.previous_close,
+      open: attrs.today_open,
+      high: attrs.today_high,
+      low: attrs.today_low,
+      
+      // Volumen & Markt
       volume: attrs.volume,
-      volumeFormatted: this._formatVolume(attrs.volume),
-      marketCap: attrs.market_cap_formatted || this._formatLargeNumber(attrs.market_cap),
+      avgVolume: attrs.avg_volume,
+      marketCap: attrs.market_cap,
+      
+      // Fundamentaldaten
       peRatio: attrs.pe_ratio,
       eps: attrs.eps,
       dividendYield: attrs.dividend_yield,
+      dividendRate: attrs.dividend_rate,
+      
+      // 52-Wochen
       week52High: attrs['52_week_high'],
       week52Low: attrs['52_week_low'],
-      avgDay50: attrs['50_day_avg'],
-      avgDay200: attrs['200_day_avg'],
-      exchange: attrs.exchange || '',
-      sector: attrs.sector || '',
-      dataSource: attrs.data_source || '',
-      signal: attrs.overall_signal || 'N/A',
-      trendDirection: attrs.trend_direction || 'neutral',
-      trendStrength: attrs.trend_strength || 0,
-      volatility: attrs.volatility || 0,
-      rsi: attrs.rsi_14,
-      rsiSignal: attrs.rsi_signal,
-      macdTrend: attrs.macd_trend,
+      
+      // Performance
       weekChange: attrs.week_change_percent,
       monthChange: attrs.month_change_percent,
       ytdChange: attrs.ytd_change_percent,
-      lastUpdated: entity.last_updated
+      
+      // Technische Analyse
+      signal: attrs.overall_signal || 'N/A',
+      rsi: attrs.rsi_14,
+      macdTrend: attrs.macd_trend,
+      trendDirection: attrs.trend_direction || 'neutral',
+      trendStrength: attrs.trend_strength,
+      
+      // Meta
+      dataSource: attrs.data_source || '',
+      dataQuality: attrs.data_quality || '',
+      lastUpdated: entity.last_updated,
+      
+      // Für Checks
+      hasMarketCap: attrs.market_cap !== undefined && attrs.market_cap !== null,
+      hasPeRatio: attrs.pe_ratio !== undefined && attrs.pe_ratio !== null,
+      hasDividend: attrs.dividend_yield !== undefined && attrs.dividend_yield !== null,
+      hasVolume: attrs.volume !== undefined && attrs.volume !== null,
+      has52Week: attrs['52_week_high'] !== undefined && attrs['52_week_low'] !== undefined,
+      hasPerformance: attrs.week_change_percent !== undefined || attrs.month_change_percent !== undefined,
+      hasIndicators: attrs.rsi_14 !== undefined || attrs.macd_trend !== undefined,
     };
   }
 
   _extractSymbol(entityId) {
-    const match = entityId.match(/sensor\.(.+)_price/);
+    const match = entityId.match(/sensor\.(.+?)(?:_price|_change|_trend|_volume|_indicators)?$/);
     return match ? match[1].toUpperCase().replace(/_/g, '.') : entityId;
   }
 
   // =========================================================================
-  // RENDER MODES
+  // MINI MODE
   // =========================================================================
 
   _renderMini(data) {
-    const color = data.isPositive ? '#4CAF50' : '#F44336';
+    const color = data.isPositive ? this._config.color_positive : this._config.color_negative;
     const arrow = data.isPositive ? '▲' : '▼';
+    const typeIcon = this._getTypeIcon(data.quoteType);
 
     this.shadowRoot.innerHTML = `
-      <style>${this._getMiniStyles()}</style>
+      <style>${this._getBaseStyles()}</style>
       <ha-card class="mini-card">
         <div class="mini-content">
-          <span class="symbol">${data.symbol}</span>
-          <span class="price">${this._formatPrice(data.price, data.currency)}</span>
-          <span class="change" style="color: ${color}">
+          <span class="mini-icon">${typeIcon}</span>
+          <span class="mini-symbol">${data.symbol}</span>
+          <span class="mini-price">${this._formatPrice(data.price, data.currency)}</span>
+          <span class="mini-change" style="color: ${color}">
             ${arrow} ${Math.abs(data.changePercent).toFixed(2)}%
           </span>
         </div>
       </ha-card>
+      <style>
+        .mini-card {
+          padding: 8px 12px;
+          cursor: pointer;
+        }
+        .mini-content {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .mini-icon {
+          font-size: 14px;
+        }
+        .mini-symbol {
+          font-weight: bold;
+          font-size: 14px;
+        }
+        .mini-price {
+          font-size: 14px;
+          margin-left: auto;
+        }
+        .mini-change {
+          font-size: 12px;
+          font-weight: 600;
+          min-width: 70px;
+          text-align: right;
+        }
+      </style>
     `;
-
     this._attachClickHandler();
   }
 
+  // =========================================================================
+  // COMPACT MODE
+  // =========================================================================
+
   _renderCompact(data) {
-    const color = data.isPositive ? '#4CAF50' : '#F44336';
+    const color = data.isPositive ? this._config.color_positive : this._config.color_negative;
     const arrow = data.isPositive ? '▲' : '▼';
+    const typeIcon = this._getTypeIcon(data.quoteType);
     const trendIcon = this._getTrendIcon(data.trendDirection);
 
     this.shadowRoot.innerHTML = `
-      <style>${this._getCompactStyles()}</style>
+      <style>${this._getBaseStyles()}</style>
       <ha-card class="compact-card">
-        <div class="header">
-          <div class="title-row">
+        ${this._config.show_header ? `
+        <div class="compact-header">
+          <div class="compact-title">
+            <span class="type-icon">${typeIcon}</span>
             <span class="symbol">${data.symbol}</span>
-            <span class="exchange">${data.exchange}</span>
+            ${data.exchange ? `<span class="exchange">${data.exchange}</span>` : ''}
           </div>
           <div class="name">${data.name}</div>
         </div>
+        ` : ''}
         
-        <div class="price-section">
+        ${this._config.show_price ? `
+        <div class="compact-price">
           <div class="price-main">
             <span class="price">${this._formatPrice(data.price, data.currency)}</span>
-            <span class="currency">${data.currency}</span>
           </div>
-          <div class="change-row">
-            <span class="change-abs" style="color: ${color}">
-              ${data.isPositive ? '+' : ''}${data.change.toFixed(2)}
-            </span>
-            <span class="change-pct" style="color: ${color}">
-              (${arrow} ${Math.abs(data.changePercent).toFixed(2)}%)
-            </span>
+          ${this._config.show_change ? `
+          <div class="change-row" style="color: ${color}">
+            <span class="change-abs">${data.isPositive ? '+' : ''}${data.change.toFixed(2)}</span>
+            <span class="change-pct">(${arrow} ${Math.abs(data.changePercent).toFixed(2)}%)</span>
           </div>
+          ` : ''}
         </div>
+        ` : ''}
 
-        <div class="footer">
+        <div class="compact-footer">
+          ${this._config.show_trend ? `
           <div class="stat">
-            <span class="label">Trend</span>
-            <span class="value">${trendIcon}</span>
+            <span class="stat-label">Trend</span>
+            <span class="stat-value">${trendIcon}</span>
           </div>
+          ` : ''}
+          ${this._config.show_volume && data.hasVolume ? `
           <div class="stat">
-            <span class="label">Vol</span>
-            <span class="value">${data.volumeFormatted}</span>
+            <span class="stat-label">Vol</span>
+            <span class="stat-value">${this._formatVolume(data.volume)}</span>
           </div>
+          ` : ''}
+          ${this._config.show_signal ? `
           <div class="stat">
-            <span class="label">Signal</span>
-            <span class="value signal-${data.signal.toLowerCase().replace('_', '-')}">${data.signal}</span>
+            <span class="stat-label">Signal</span>
+            <span class="stat-value signal-${data.signal.toLowerCase().replace('_', '-')}">${data.signal}</span>
           </div>
+          ` : ''}
         </div>
       </ha-card>
+      <style>
+        .compact-card {
+          padding: 16px;
+          cursor: pointer;
+        }
+        .compact-header {
+          margin-bottom: 12px;
+        }
+        .compact-title {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .type-icon {
+          font-size: 16px;
+        }
+        .symbol {
+          font-weight: bold;
+          font-size: 18px;
+        }
+        .exchange {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          background: var(--secondary-background-color);
+          padding: 2px 6px;
+          border-radius: 4px;
+        }
+        .name {
+          font-size: 13px;
+          color: var(--secondary-text-color);
+          margin-top: 4px;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .compact-price {
+          margin: 12px 0;
+        }
+        .price-main {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+        }
+        .price {
+          font-size: 28px;
+          font-weight: bold;
+        }
+        .change-row {
+          display: flex;
+          gap: 8px;
+          margin-top: 4px;
+          font-weight: 600;
+        }
+        .compact-footer {
+          display: flex;
+          justify-content: space-between;
+          padding-top: 12px;
+          border-top: 1px solid var(--divider-color);
+        }
+        .stat {
+          text-align: center;
+          flex: 1;
+        }
+        .stat-label {
+          display: block;
+          font-size: 10px;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          margin-bottom: 2px;
+        }
+        .stat-value {
+          font-size: 13px;
+          font-weight: 600;
+        }
+        .signal-buy, .signal-strong-buy { color: ${this._config.color_positive}; }
+        .signal-sell, .signal-strong-sell { color: ${this._config.color_negative}; }
+        .signal-hold { color: #FF9800; }
+      </style>
     `;
-
     this._attachClickHandler();
   }
 
+  // =========================================================================
+  // FULL MODE
+  // =========================================================================
+
   _renderFull(data) {
-    const color = data.isPositive ? '#4CAF50' : '#F44336';
-    const bgColor = data.isPositive ? 'rgba(76, 175, 80, 0.1)' : 'rgba(244, 67, 54, 0.1)';
+    const color = data.isPositive ? this._config.color_positive : this._config.color_negative;
+    const bgColor = data.isPositive ? `${this._config.color_positive}15` : `${this._config.color_negative}15`;
     const arrow = data.isPositive ? '▲' : '▼';
+    const typeIcon = this._getTypeIcon(data.quoteType);
     const trendIcon = this._getTrendIcon(data.trendDirection);
 
     this.shadowRoot.innerHTML = `
-      <style>${this._getFullStyles()}</style>
+      <style>${this._getBaseStyles()}</style>
       <ha-card class="full-card">
-        <!-- Header -->
+        
+        <!-- HEADER -->
+        ${this._config.show_header ? `
         <div class="header">
           <div class="header-left">
-            <div class="symbol-badge">${data.symbol}</div>
+            <div class="symbol-badge">${typeIcon} ${data.symbol}</div>
             <div class="company-info">
               <span class="company-name">${data.name}</span>
-              <span class="exchange-info">${data.exchange}${data.sector ? ' · ' + data.sector : ''}</span>
+              <span class="exchange-info">${data.exchange}${data.quoteType !== 'EQUITY' ? ' • ' + this._getTypeLabel(data.quoteType) : ''}</span>
             </div>
           </div>
-          <div class="header-right">
-            <div class="trend-badge trend-${data.trendDirection}">
-              ${trendIcon} ${this._formatTrend(data.trendDirection)}
-            </div>
+          ${this._config.show_trend ? `
+          <div class="trend-badge trend-${data.trendDirection}">
+            ${trendIcon} ${this._formatTrend(data.trendDirection)}
           </div>
+          ` : ''}
         </div>
+        ` : ''}
 
-        <!-- Price Section -->
+        <!-- PRICE SECTION -->
+        ${this._config.show_price ? `
         <div class="price-section" style="background: ${bgColor}">
           <div class="price-main">
             <span class="price">${this._formatPrice(data.price, data.currency)}</span>
             <span class="currency">${data.currency}</span>
           </div>
+          ${this._config.show_change ? `
           <div class="price-change" style="color: ${color}">
-            <span class="change-value">
-              ${data.isPositive ? '+' : ''}${data.change.toFixed(2)}
-            </span>
-            <span class="change-percent">
-              (${arrow} ${Math.abs(data.changePercent).toFixed(2)}%)
-            </span>
+            <span class="change-value">${data.isPositive ? '+' : ''}${data.change.toFixed(2)}</span>
+            <span class="change-percent">(${arrow} ${Math.abs(data.changePercent).toFixed(2)}%)</span>
           </div>
+          ` : ''}
         </div>
+        ` : ''}
 
-        <!-- Day Stats -->
+        <!-- DAY STATS -->
+        ${this._config.show_day_range ? `
         <div class="stats-grid">
           <div class="stat-item">
             <span class="stat-label">Eröffnung</span>
-            <span class="stat-value">${this._formatPrice(data.open, data.currency)}</span>
+            <span class="stat-value">${this._formatValue(data.open, data.currency)}</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">Vortag</span>
-            <span class="stat-value">${this._formatPrice(data.previousClose, data.currency)}</span>
+            <span class="stat-value">${this._formatValue(data.previousClose, data.currency)}</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">Tageshoch</span>
-            <span class="stat-value high">${this._formatPrice(data.high, data.currency)}</span>
+            <span class="stat-value high">${this._formatValue(data.high, data.currency)}</span>
           </div>
           <div class="stat-item">
             <span class="stat-label">Tagestief</span>
-            <span class="stat-value low">${this._formatPrice(data.low, data.currency)}</span>
+            <span class="stat-value low">${this._formatValue(data.low, data.currency)}</span>
           </div>
         </div>
+        ` : ''}
 
-        <!-- Volume & Market Data -->
+        <!-- DATA SECTION -->
         <div class="data-section">
+          ${this._config.show_volume && data.hasVolume ? `
           <div class="data-row">
             <span class="data-label">📊 Volumen</span>
-            <span class="data-value">${data.volumeFormatted}</span>
+            <span class="data-value">${this._formatVolume(data.volume)}</span>
           </div>
+          ` : ''}
+          
+          ${this._config.show_market_cap && data.hasMarketCap ? `
           <div class="data-row">
             <span class="data-label">🏛️ Marktkapitalisierung</span>
-            <span class="data-value">${data.marketCap || 'N/A'}</span>
+            <span class="data-value">${this._formatLargeNumber(data.marketCap)}</span>
           </div>
-          ${data.peRatio ? `
+          ` : ''}
+          
+          ${this._config.show_pe_ratio && data.hasPeRatio ? `
           <div class="data-row">
             <span class="data-label">📈 KGV (P/E)</span>
             <span class="data-value">${parseFloat(data.peRatio).toFixed(2)}</span>
           </div>
           ` : ''}
-          ${data.dividendYield ? `
+          
+          ${this._config.show_dividend && data.hasDividend ? `
           <div class="data-row">
             <span class="data-label">💰 Dividendenrendite</span>
             <span class="data-value">${parseFloat(data.dividendYield).toFixed(2)}%</span>
@@ -301,44 +472,44 @@ class StockTrackerCard extends HTMLElement {
           ` : ''}
         </div>
 
-        <!-- 52 Week Range -->
-        ${data.week52Low && data.week52High ? this._render52WeekRange(data) : ''}
+        <!-- 52 WEEK RANGE -->
+        ${this._config.show_52_week_range && data.has52Week ? this._render52WeekRange(data) : ''}
 
-        <!-- Period Performance -->
-        ${this._renderPeriodPerformance(data)}
+        <!-- PERFORMANCE -->
+        ${this._config.show_performance && data.hasPerformance ? this._renderPerformance(data) : ''}
 
-        <!-- Technical Indicators -->
-        ${this._config.show_indicators ? this._renderIndicators(data) : ''}
+        <!-- INDICATORS -->
+        ${this._config.show_indicators && data.hasIndicators ? this._renderIndicators(data) : ''}
 
-        <!-- Footer -->
+        <!-- FOOTER -->
+        ${this._config.show_footer ? `
         <div class="card-footer">
-          <span class="data-source">📡 ${data.dataSource || 'Yahoo'}</span>
+          ${this._config.show_source && data.dataSource ? `
+          <span class="data-source">📡 ${data.dataSource}</span>
+          ` : '<span></span>'}
+          ${this._config.show_signal ? `
           <span class="signal-badge signal-${data.signal.toLowerCase().replace('_', '-')}">
             ${this._getSignalIcon(data.signal)} ${data.signal}
           </span>
+          ` : ''}
         </div>
+        ` : ''}
       </ha-card>
+      ${this._getFullStyles()}
     `;
-
     this._attachClickHandler();
   }
 
-  // =========================================================================
-  // RENDER COMPONENTS
-  // =========================================================================
-
   _render52WeekRange(data) {
-    const low = data.week52Low;
-    const high = data.week52High;
+    const low = parseFloat(data.week52Low);
+    const high = parseFloat(data.week52High);
     const current = data.price;
     const range = high - low;
     const position = range > 0 ? ((current - low) / range) * 100 : 50;
 
     return `
       <div class="range-section">
-        <div class="range-header">
-          <span class="range-title">52-Wochen Spanne</span>
-        </div>
+        <div class="range-title">52-Wochen Spanne</div>
         <div class="range-bar-container">
           <span class="range-low">${this._formatPrice(low, data.currency)}</span>
           <div class="range-bar">
@@ -351,7 +522,7 @@ class StockTrackerCard extends HTMLElement {
     `;
   }
 
-  _renderPeriodPerformance(data) {
+  _renderPerformance(data) {
     const periods = [
       { label: '1W', value: data.weekChange },
       { label: '1M', value: data.monthChange },
@@ -362,11 +533,11 @@ class StockTrackerCard extends HTMLElement {
 
     return `
       <div class="performance-section">
-        <div class="performance-header">Performance</div>
+        <div class="section-title">Performance</div>
         <div class="performance-grid">
           ${periods.map(p => {
-            const isPositive = p.value >= 0;
-            const color = isPositive ? '#4CAF50' : '#F44336';
+            const isPositive = parseFloat(p.value) >= 0;
+            const color = isPositive ? this._config.color_positive : this._config.color_negative;
             return `
               <div class="perf-item">
                 <span class="perf-label">${p.label}</span>
@@ -382,16 +553,14 @@ class StockTrackerCard extends HTMLElement {
   }
 
   _renderIndicators(data) {
-    if (!data.rsi && !data.macdTrend) return '';
-
     return `
       <div class="indicators-section">
-        <div class="indicators-header">📊 Technische Indikatoren</div>
+        <div class="section-title">📊 Technische Indikatoren</div>
         <div class="indicators-grid">
-          ${data.rsi ? `
+          ${data.rsi !== undefined ? `
           <div class="indicator-item">
             <span class="indicator-label">RSI (14)</span>
-            <div class="indicator-value-row">
+            <div class="indicator-row">
               <span class="indicator-value">${parseFloat(data.rsi).toFixed(1)}</span>
               <span class="indicator-signal ${this._getRsiClass(data.rsi)}">
                 ${this._getRsiLabel(data.rsi)}
@@ -402,6 +571,7 @@ class StockTrackerCard extends HTMLElement {
             </div>
           </div>
           ` : ''}
+          
           ${data.macdTrend ? `
           <div class="indicator-item">
             <span class="indicator-label">MACD</span>
@@ -410,13 +580,16 @@ class StockTrackerCard extends HTMLElement {
             </span>
           </div>
           ` : ''}
-          ${data.trendStrength ? `
+          
+          ${data.trendStrength !== undefined ? `
           <div class="indicator-item">
             <span class="indicator-label">Trend-Stärke</span>
-            <div class="strength-bar">
-              <div class="strength-fill" style="width: ${data.trendStrength * 10}%"></div>
+            <div class="indicator-row">
+              <div class="strength-bar">
+                <div class="strength-fill" style="width: ${parseFloat(data.trendStrength) * 10}%"></div>
+              </div>
+              <span class="indicator-value">${parseFloat(data.trendStrength).toFixed(1)}/10</span>
             </div>
-            <span class="indicator-value">${parseFloat(data.trendStrength).toFixed(1)}/10</span>
           </div>
           ` : ''}
         </div>
@@ -426,40 +599,12 @@ class StockTrackerCard extends HTMLElement {
 
   _renderError(message) {
     this.shadowRoot.innerHTML = `
-      <style>
-        .error-card {
-          padding: 16px;
-          background: var(--card-background-color, #fff);
-          border-radius: var(--ha-card-border-radius, 12px);
-          border: 1px solid var(--error-color, #F44336);
-        }
-        .error-content {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          color: var(--error-color, #F44336);
-        }
-        .error-icon {
-          font-size: 24px;
-        }
-        .error-text {
-          flex: 1;
-        }
-        .error-title {
-          font-weight: bold;
-          margin-bottom: 4px;
-        }
-        .error-message {
-          font-size: 12px;
-          opacity: 0.8;
-        }
-      </style>
-      <ha-card class="error-card">
-        <div class="error-content">
-          <span class="error-icon">⚠️</span>
-          <div class="error-text">
-            <div class="error-title">Fehler</div>
-            <div class="error-message">${message}</div>
+      <ha-card style="padding: 16px; border: 1px solid var(--error-color);">
+        <div style="display: flex; align-items: center; gap: 12px; color: var(--error-color);">
+          <span style="font-size: 24px;">⚠️</span>
+          <div>
+            <div style="font-weight: bold;">Fehler</div>
+            <div style="font-size: 12px; opacity: 0.8;">${message}</div>
           </div>
         </div>
       </ha-card>
@@ -470,485 +615,335 @@ class StockTrackerCard extends HTMLElement {
   // STYLES
   // =========================================================================
 
-  _getMiniStyles() {
+  _getBaseStyles() {
     return `
       :host {
         display: block;
       }
-      .mini-card {
-        padding: 8px 12px;
-        cursor: pointer;
-        transition: transform 0.2s, box-shadow 0.2s;
-      }
-      .mini-card:hover {
-        transform: translateY(-2px);
-        box-shadow: var(--ha-card-box-shadow, 0 4px 8px rgba(0,0,0,0.2));
-      }
-      .mini-content {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-      .symbol {
-        font-weight: bold;
-        font-size: 14px;
-        color: var(--primary-text-color);
-      }
-      .price {
-        font-size: 14px;
-        color: var(--primary-text-color);
-      }
-      .change {
-        font-size: 12px;
-        font-weight: 500;
-        margin-left: auto;
-      }
-    `;
-  }
-
-  _getCompactStyles() {
-    return `
-      :host {
-        display: block;
-      }
-      .compact-card {
-        padding: 16px;
-        cursor: pointer;
-      }
-      .header {
-        margin-bottom: 12px;
-      }
-      .title-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .symbol {
-        font-weight: bold;
-        font-size: 18px;
-        color: var(--primary-text-color);
-      }
-      .exchange {
-        font-size: 11px;
-        color: var(--secondary-text-color);
-        background: var(--secondary-background-color, #f5f5f5);
-        padding: 2px 6px;
-        border-radius: 4px;
-      }
-      .name {
-        font-size: 13px;
-        color: var(--secondary-text-color);
-        margin-top: 4px;
-        white-space: nowrap;
+      ha-card {
         overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .price-section {
-        margin: 12px 0;
-      }
-      .price-main {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-      }
-      .price {
-        font-size: 28px;
-        font-weight: bold;
-        color: var(--primary-text-color);
-      }
-      .currency {
-        font-size: 14px;
-        color: var(--secondary-text-color);
-      }
-      .change-row {
-        display: flex;
-        gap: 8px;
-        margin-top: 4px;
-      }
-      .change-abs, .change-pct {
-        font-size: 14px;
-        font-weight: 500;
-      }
-      .footer {
-        display: flex;
-        justify-content: space-between;
-        padding-top: 12px;
-        border-top: 1px solid var(--divider-color, #e0e0e0);
-      }
-      .stat {
-        text-align: center;
-        flex: 1;
-      }
-      .stat .label {
-        display: block;
-        font-size: 10px;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        margin-bottom: 2px;
-      }
-      .stat .value {
-        font-size: 13px;
-        font-weight: 600;
-      }
-      .signal-buy, .signal-strong-buy {
-        color: #4CAF50;
-      }
-      .signal-sell, .signal-strong-sell {
-        color: #F44336;
-      }
-      .signal-hold {
-        color: #FF9800;
       }
     `;
   }
 
   _getFullStyles() {
     return `
-      :host {
-        display: block;
-      }
-      
-      .full-card {
-        overflow: hidden;
-      }
+      <style>
+        .full-card {
+          cursor: pointer;
+        }
+        
+        /* Header */
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          padding: 16px;
+        }
+        .header-left {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          flex: 1;
+          min-width: 0;
+        }
+        .symbol-badge {
+          background: var(--primary-color);
+          color: white;
+          padding: 8px 12px;
+          border-radius: 8px;
+          font-weight: bold;
+          font-size: 14px;
+          white-space: nowrap;
+        }
+        .company-info {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+        }
+        .company-name {
+          font-size: 15px;
+          font-weight: 500;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .exchange-info {
+          font-size: 12px;
+          color: var(--secondary-text-color);
+        }
+        .trend-badge {
+          padding: 4px 10px;
+          border-radius: 6px;
+          font-size: 11px;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        .trend-strong_bullish, .trend-bullish {
+          background: ${this._config.color_positive}20;
+          color: ${this._config.color_positive};
+        }
+        .trend-strong_bearish, .trend-bearish {
+          background: ${this._config.color_negative}20;
+          color: ${this._config.color_negative};
+        }
+        .trend-neutral {
+          background: ${this._config.color_neutral}20;
+          color: ${this._config.color_neutral};
+        }
 
-      .header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        padding: 16px;
-        cursor: pointer;
-        background: var(--card-background-color);
-      }
-      .header-left {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        flex: 1;
-        min-width: 0;
-      }
-      .symbol-badge {
-        background: var(--primary-color, #03a9f4);
-        color: white;
-        padding: 8px 12px;
-        border-radius: 8px;
-        font-weight: bold;
-        font-size: 14px;
-        flex-shrink: 0;
-      }
-      .company-info {
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-      }
-      .company-name {
-        font-size: 15px;
-        font-weight: 500;
-        color: var(--primary-text-color);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .exchange-info {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-      }
-      .trend-badge {
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 11px;
-        font-weight: 600;
-        white-space: nowrap;
-      }
-      .trend-strong_bullish, .trend-bullish {
-        background: rgba(76, 175, 80, 0.15);
-        color: #4CAF50;
-      }
-      .trend-strong_bearish, .trend-bearish {
-        background: rgba(244, 67, 54, 0.15);
-        color: #F44336;
-      }
-      .trend-neutral {
-        background: rgba(158, 158, 158, 0.15);
-        color: var(--secondary-text-color);
-      }
+        /* Price */
+        .price-section {
+          padding: 20px 16px;
+          text-align: center;
+        }
+        .price-main {
+          display: flex;
+          justify-content: center;
+          align-items: baseline;
+          gap: 8px;
+        }
+        .price {
+          font-size: 36px;
+          font-weight: bold;
+        }
+        .currency {
+          font-size: 18px;
+          color: var(--secondary-text-color);
+        }
+        .price-change {
+          margin-top: 8px;
+          font-size: 16px;
+          font-weight: 600;
+        }
 
-      .price-section {
-        padding: 20px 16px;
-        text-align: center;
-      }
-      .price-main {
-        display: flex;
-        justify-content: center;
-        align-items: baseline;
-        gap: 8px;
-      }
-      .price {
-        font-size: 36px;
-        font-weight: bold;
-        color: var(--primary-text-color);
-      }
-      .currency {
-        font-size: 18px;
-        color: var(--secondary-text-color);
-      }
-      .price-change {
-        margin-top: 8px;
-        font-size: 16px;
-        font-weight: 600;
-      }
-      .change-value {
-        margin-right: 8px;
-      }
+        /* Stats Grid */
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 1px;
+          background: var(--divider-color);
+          margin: 0 16px 16px;
+          border-radius: 8px;
+          overflow: hidden;
+        }
+        .stat-item {
+          display: flex;
+          flex-direction: column;
+          padding: 12px;
+          background: var(--card-background-color);
+        }
+        .stat-label {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          margin-bottom: 4px;
+        }
+        .stat-value {
+          font-size: 15px;
+          font-weight: 600;
+        }
+        .stat-value.high { color: ${this._config.color_positive}; }
+        .stat-value.low { color: ${this._config.color_negative}; }
 
-      .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 1px;
-        background: var(--divider-color, #e0e0e0);
-        margin: 0 16px 16px;
-        border-radius: 8px;
-        overflow: hidden;
-      }
-      .stat-item {
-        display: flex;
-        flex-direction: column;
-        padding: 12px;
-        background: var(--card-background-color);
-      }
-      .stat-label {
-        font-size: 11px;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        margin-bottom: 4px;
-      }
-      .stat-value {
-        font-size: 15px;
-        font-weight: 600;
-        color: var(--primary-text-color);
-      }
-      .stat-value.high {
-        color: #4CAF50;
-      }
-      .stat-value.low {
-        color: #F44336;
-      }
+        /* Data Section */
+        .data-section {
+          padding: 0 16px;
+        }
+        .data-row {
+          display: flex;
+          justify-content: space-between;
+          padding: 10px 0;
+          border-bottom: 1px solid var(--divider-color);
+        }
+        .data-row:last-child {
+          border-bottom: none;
+        }
+        .data-label {
+          font-size: 13px;
+          color: var(--secondary-text-color);
+        }
+        .data-value {
+          font-size: 13px;
+          font-weight: 600;
+        }
 
-      .data-section {
-        padding: 0 16px 16px;
-      }
-      .data-row {
-        display: flex;
-        justify-content: space-between;
-        padding: 10px 0;
-        border-bottom: 1px solid var(--divider-color, #e0e0e0);
-      }
-      .data-row:last-child {
-        border-bottom: none;
-      }
-      .data-label {
-        font-size: 13px;
-        color: var(--secondary-text-color);
-      }
-      .data-value {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--primary-text-color);
-      }
+        /* 52 Week Range */
+        .range-section {
+          padding: 16px;
+          background: var(--secondary-background-color);
+        }
+        .range-title, .section-title {
+          font-size: 12px;
+          font-weight: 600;
+          color: var(--secondary-text-color);
+          text-transform: uppercase;
+          margin-bottom: 12px;
+        }
+        .range-bar-container {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .range-low, .range-high {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          min-width: 55px;
+        }
+        .range-high { text-align: right; }
+        .range-bar {
+          flex: 1;
+          height: 8px;
+          background: var(--divider-color);
+          border-radius: 4px;
+          position: relative;
+        }
+        .range-fill {
+          height: 100%;
+          background: linear-gradient(90deg, ${this._config.color_negative}, #FF9800, ${this._config.color_positive});
+          border-radius: 4px;
+        }
+        .range-marker {
+          position: absolute;
+          top: 50%;
+          width: 14px;
+          height: 14px;
+          background: var(--primary-color);
+          border: 2px solid white;
+          border-radius: 50%;
+          transform: translate(-50%, -50%);
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
 
-      .range-section {
-        padding: 16px;
-        background: var(--secondary-background-color, #f5f5f5);
-      }
-      .range-title {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        margin-bottom: 12px;
-        display: block;
-      }
-      .range-bar-container {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .range-low, .range-high {
-        font-size: 11px;
-        color: var(--secondary-text-color);
-        min-width: 55px;
-      }
-      .range-high {
-        text-align: right;
-      }
-      .range-bar {
-        flex: 1;
-        height: 8px;
-        background: var(--divider-color, #e0e0e0);
-        border-radius: 4px;
-        position: relative;
-      }
-      .range-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #F44336 0%, #FF9800 50%, #4CAF50 100%);
-        border-radius: 4px;
-      }
-      .range-marker {
-        position: absolute;
-        top: 50%;
-        width: 14px;
-        height: 14px;
-        background: var(--primary-color, #03a9f4);
-        border: 2px solid white;
-        border-radius: 50%;
-        transform: translate(-50%, -50%);
-        box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-      }
+        /* Performance */
+        .performance-section {
+          padding: 16px;
+        }
+        .performance-grid {
+          display: flex;
+          gap: 12px;
+        }
+        .perf-item {
+          flex: 1;
+          text-align: center;
+          padding: 10px;
+          background: var(--secondary-background-color);
+          border-radius: 8px;
+        }
+        .perf-label {
+          display: block;
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          margin-bottom: 4px;
+        }
+        .perf-value {
+          font-size: 16px;
+          font-weight: bold;
+        }
 
-      .performance-section {
-        padding: 16px;
-      }
-      .performance-header {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--secondary-text-color);
-        text-transform: uppercase;
-        margin-bottom: 12px;
-      }
-      .performance-grid {
-        display: flex;
-        gap: 12px;
-      }
-      .perf-item {
-        flex: 1;
-        text-align: center;
-        padding: 10px;
-        background: var(--secondary-background-color, #f5f5f5);
-        border-radius: 8px;
-      }
-      .perf-label {
-        display: block;
-        font-size: 11px;
-        color: var(--secondary-text-color);
-        margin-bottom: 4px;
-      }
-      .perf-value {
-        font-size: 16px;
-        font-weight: bold;
-      }
+        /* Indicators */
+        .indicators-section {
+          padding: 16px;
+          border-top: 1px solid var(--divider-color);
+        }
+        .indicators-grid {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .indicator-item {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .indicator-label {
+          font-size: 12px;
+          color: var(--secondary-text-color);
+        }
+        .indicator-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .indicator-value {
+          font-size: 14px;
+          font-weight: 600;
+        }
+        .indicator-signal {
+          font-size: 11px;
+          padding: 3px 8px;
+          border-radius: 4px;
+          font-weight: 500;
+        }
+        .indicator-signal.oversold {
+          background: ${this._config.color_positive}20;
+          color: ${this._config.color_positive};
+        }
+        .indicator-signal.neutral {
+          background: ${this._config.color_neutral}20;
+          color: ${this._config.color_neutral};
+        }
+        .indicator-signal.overbought {
+          background: ${this._config.color_negative}20;
+          color: ${this._config.color_negative};
+        }
+        .indicator-signal.macd-bullish {
+          background: ${this._config.color_positive}20;
+          color: ${this._config.color_positive};
+        }
+        .indicator-signal.macd-bearish {
+          background: ${this._config.color_negative}20;
+          color: ${this._config.color_negative};
+        }
+        .rsi-bar, .strength-bar {
+          flex: 1;
+          height: 6px;
+          background: var(--divider-color);
+          border-radius: 3px;
+          overflow: hidden;
+        }
+        .rsi-fill, .strength-fill {
+          height: 100%;
+          background: var(--primary-color);
+          border-radius: 3px;
+        }
 
-      .indicators-section {
-        padding: 16px;
-        border-top: 1px solid var(--divider-color, #e0e0e0);
-      }
-      .indicators-header {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--primary-text-color);
-        margin-bottom: 12px;
-      }
-      .indicators-grid {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-      .indicator-item {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .indicator-label {
-        font-size: 12px;
-        color: var(--secondary-text-color);
-      }
-      .indicator-value-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .indicator-value {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--primary-text-color);
-      }
-      .indicator-signal {
-        font-size: 11px;
-        padding: 3px 8px;
-        border-radius: 4px;
-        font-weight: 500;
-      }
-      .indicator-signal.oversold {
-        background: rgba(76, 175, 80, 0.15);
-        color: #4CAF50;
-      }
-      .indicator-signal.neutral {
-        background: rgba(158, 158, 158, 0.15);
-        color: var(--secondary-text-color);
-      }
-      .indicator-signal.overbought {
-        background: rgba(244, 67, 54, 0.15);
-        color: #F44336;
-      }
-      .indicator-signal.macd-bullish {
-        background: rgba(76, 175, 80, 0.15);
-        color: #4CAF50;
-      }
-      .indicator-signal.macd-bearish {
-        background: rgba(244, 67, 54, 0.15);
-        color: #F44336;
-      }
-
-      .rsi-bar, .strength-bar {
-        height: 6px;
-        background: var(--divider-color, #e0e0e0);
-        border-radius: 3px;
-        overflow: hidden;
-      }
-      .rsi-fill {
-        height: 100%;
-        background: var(--primary-color, #03a9f4);
-        border-radius: 3px;
-      }
-      .strength-fill {
-        height: 100%;
-        background: var(--primary-color, #03a9f4);
-        border-radius: 3px;
-      }
-
-      .card-footer {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 12px 16px;
-        background: var(--secondary-background-color, #f5f5f5);
-        border-top: 1px solid var(--divider-color, #e0e0e0);
-      }
-      .data-source {
-        font-size: 11px;
-        color: var(--disabled-text-color, #9e9e9e);
-      }
-      .signal-badge {
-        font-size: 12px;
-        font-weight: 600;
-        padding: 4px 10px;
-        border-radius: 6px;
-      }
-      .signal-badge.signal-buy, .signal-badge.signal-strong-buy {
-        background: rgba(76, 175, 80, 0.15);
-        color: #4CAF50;
-      }
-      .signal-badge.signal-sell, .signal-badge.signal-strong-sell {
-        background: rgba(244, 67, 54, 0.15);
-        color: #F44336;
-      }
-      .signal-badge.signal-hold {
-        background: rgba(255, 152, 0, 0.15);
-        color: #FF9800;
-      }
-      .signal-badge.signal-n-a {
-        background: var(--secondary-background-color, #f5f5f5);
-        color: var(--secondary-text-color);
-      }
+        /* Footer */
+        .card-footer {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 16px;
+          background: var(--secondary-background-color);
+          border-top: 1px solid var(--divider-color);
+        }
+        .data-source {
+          font-size: 11px;
+          color: var(--disabled-text-color);
+        }
+        .signal-badge {
+          font-size: 12px;
+          font-weight: 600;
+          padding: 4px 10px;
+          border-radius: 6px;
+        }
+        .signal-badge.signal-buy, .signal-badge.signal-strong-buy {
+          background: ${this._config.color_positive}20;
+          color: ${this._config.color_positive};
+        }
+        .signal-badge.signal-sell, .signal-badge.signal-strong-sell {
+          background: ${this._config.color_negative}20;
+          color: ${this._config.color_negative};
+        }
+        .signal-badge.signal-hold {
+          background: #FF980020;
+          color: #FF9800;
+        }
+        .signal-badge.signal-n-a {
+          background: var(--secondary-background-color);
+          color: var(--secondary-text-color);
+        }
+      </style>
     `;
   }
 
@@ -958,32 +953,54 @@ class StockTrackerCard extends HTMLElement {
 
   _formatPrice(value, currency) {
     if (value === null || value === undefined || isNaN(value)) return 'N/A';
-    
     const symbols = { 'USD': '$', 'EUR': '€', 'GBP': '£', 'JPY': '¥', 'CHF': 'CHF ' };
     const symbol = symbols[currency] || currency + ' ';
-    
-    return symbol + new Intl.NumberFormat('de-DE', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
+    return symbol + parseFloat(value).toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  _formatValue(value, currency) {
+    if (value === null || value === undefined) return 'N/A';
+    return this._formatPrice(value, currency);
   }
 
   _formatVolume(value) {
     if (!value) return 'N/A';
     value = parseFloat(value);
-    if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
-    if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+    if (value >= 1e9) return (value / 1e9).toFixed(2) + ' Mrd';
+    if (value >= 1e6) return (value / 1e6).toFixed(2) + ' Mio';
     if (value >= 1e3) return (value / 1e3).toFixed(1) + 'K';
-    return value.toString();
+    return value.toLocaleString('de-DE');
   }
 
   _formatLargeNumber(value) {
     if (!value) return 'N/A';
     value = parseFloat(value);
-    if (value >= 1e12) return (value / 1e12).toFixed(2) + 'T';
-    if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
-    if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
+    if (value >= 1e12) return (value / 1e12).toFixed(2) + ' Bio';
+    if (value >= 1e9) return (value / 1e9).toFixed(2) + ' Mrd';
+    if (value >= 1e6) return (value / 1e6).toFixed(2) + ' Mio';
     return value.toLocaleString('de-DE');
+  }
+
+  _getTypeIcon(type) {
+    const icons = {
+      'CRYPTOCURRENCY': '🪙',
+      'ETF': '📊',
+      'INDEX': '📉',
+      'EQUITY': '📈',
+      'MUTUALFUND': '🏦',
+    };
+    return icons[type] || '📈';
+  }
+
+  _getTypeLabel(type) {
+    const labels = {
+      'CRYPTOCURRENCY': 'Krypto',
+      'ETF': 'ETF',
+      'INDEX': 'Index',
+      'EQUITY': 'Aktie',
+      'MUTUALFUND': 'Fonds',
+    };
+    return labels[type] || type;
   }
 
   _getTrendIcon(trend) {
@@ -1009,13 +1026,7 @@ class StockTrackerCard extends HTMLElement {
   }
 
   _getSignalIcon(signal) {
-    const icons = {
-      'STRONG_BUY': '🟢',
-      'BUY': '🟩',
-      'HOLD': '🟨',
-      'SELL': '🟧',
-      'STRONG_SELL': '🔴',
-    };
+    const icons = { 'STRONG_BUY': '🟢', 'BUY': '🟩', 'HOLD': '🟨', 'SELL': '🟧', 'STRONG_SELL': '🔴' };
     return icons[signal] || '⚪';
   }
 
@@ -1040,14 +1051,9 @@ class StockTrackerCard extends HTMLElement {
   _attachClickHandler() {
     const card = this.shadowRoot.querySelector('ha-card');
     if (card) {
-      card.style.cursor = 'pointer';
       card.addEventListener('click', () => this._handleClick());
     }
   }
-
-  // =========================================================================
-  // STATIC CONFIG
-  // =========================================================================
 
   static getConfigElement() {
     return document.createElement('stock-tracker-card-editor');
@@ -1057,395 +1063,7 @@ class StockTrackerCard extends HTMLElement {
     return {
       entity: '',
       display_mode: 'compact',
-      show_chart: true,
-      show_indicators: true
+      show_indicators: true,
     };
   }
-}
-
-
-// =============================================================================
-// CARD EDITOR 
-// =============================================================================
-
-class StockTrackerCardEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._hass = null;
-  }
-
-  setConfig(config) {
-    this._config = { ...config };
-    if (this._hass) {
-      this._render();
-    }
-  }
-
-  set hass(hass) {
-    const firstTime = !this._hass;
-    this._hass = hass;
-    
-    if (firstTime || !this.shadowRoot.querySelector('.editor')) {
-      this._render();
-    }
-  }
-
-  _getStockEntities() {
-    if (!this._hass || !this._hass.states) {
-      console.log('Stock Tracker Editor: hass oder states nicht verfügbar');
-      return [];
-    }
-
-    const entities = [];
-
-    for (const [entityId, state] of Object.entries(this._hass.states)) {
-      // Nur Sensoren
-      if (!entityId.startsWith('sensor.')) {
-        continue;
-      }
-
-      const attrs = state.attributes || {};
-      
-      // Prüfe ob es ein Stock Tracker Sensor ist anhand der Attribute
-      // Das ist die zuverlässigste Methode!
-      const isStockSensor = (
-        attrs.symbol !== undefined &&
-        (
-          attrs.change_percent !== undefined ||
-          attrs.previous_close !== undefined ||
-          attrs.data_source !== undefined ||
-          attrs.overall_signal !== undefined ||
-          attrs.company_name !== undefined
-        )
-      );
-
-      if (isStockSensor) {
-        const symbol = attrs.symbol || entityId;
-        const name = attrs.company_name || attrs.friendly_name || symbol;
-        const price = state.state;
-        const currency = attrs.currency || 'USD';
-        const change = attrs.change_percent;
-        const quoteType = attrs.quote_type || 'EQUITY';
-
-        // Icon basierend auf Typ
-        let typeIcon = '📈';
-        if (quoteType === 'CRYPTOCURRENCY') typeIcon = '🪙';
-        else if (quoteType === 'ETF') typeIcon = '📊';
-        else if (quoteType === 'INDEX') typeIcon = '📉';
-
-        let label = `${typeIcon} ${symbol}`;
-        if (name && name !== symbol && !name.includes(symbol)) {
-          label += ` - ${name}`;
-        }
-        if (price && price !== 'unavailable' && price !== 'unknown') {
-          label += ` (${parseFloat(price).toFixed(2)} ${currency}`;
-          if (change !== undefined && change !== null) {
-            const sign = parseFloat(change) >= 0 ? '+' : '';
-            label += `, ${sign}${parseFloat(change).toFixed(2)}%`;
-          }
-          label += ')';
-        }
-
-        entities.push({
-          id: entityId,
-          symbol: symbol,
-          name: name,
-          label: label,
-          type: quoteType,
-        });
-      }
-    }
-
-    // Sortieren: Erst nach Typ, dann alphabetisch
-    entities.sort((a, b) => {
-      if (a.type !== b.type) {
-        const typeOrder = { 'INDEX': 0, 'EQUITY': 1, 'ETF': 2, 'CRYPTOCURRENCY': 3 };
-        return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
-      }
-      return a.symbol.localeCompare(b.symbol);
-    });
-    
-    console.log('Stock Tracker Editor: Gefundene Entities:', entities.length, entities);
-    return entities;
-  }
-
-  _render() {
-    if (!this._hass) {
-      this.shadowRoot.innerHTML = `
-        <div style="padding: 16px; text-align: center; color: var(--secondary-text-color);">
-          Lade...
-        </div>
-      `;
-      return;
-    }
-
-    const stockEntities = this._getStockEntities();
-    const currentEntity = this._config.entity || '';
-    const currentMode = this._config.display_mode || 'compact';
-    const showIndicators = this._config.show_indicators !== false;
-    const showChart = this._config.show_chart !== false;
-    const customName = this._config.name || '';
-
-    // Entity-Optionen HTML erstellen mit Gruppierung
-    let entityOptionsHtml = '<option value="">-- Bitte wählen --</option>';
-    
-    let currentType = '';
-    stockEntities.forEach(e => {
-      // Gruppierung nach Typ
-      if (e.type !== currentType) {
-        if (currentType !== '') {
-          entityOptionsHtml += '</optgroup>';
-        }
-        const typeLabels = {
-          'INDEX': '📉 Indizes',
-          'EQUITY': '📈 Aktien',
-          'ETF': '📊 ETFs',
-          'CRYPTOCURRENCY': '🪙 Kryptowährungen'
-        };
-        entityOptionsHtml += `<optgroup label="${typeLabels[e.type] || e.type}">`;
-        currentType = e.type;
-      }
-      
-      const selected = e.id === currentEntity ? 'selected' : '';
-      const safeLabel = e.label.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      entityOptionsHtml += `<option value="${e.id}" ${selected}>${safeLabel}</option>`;
-    });
-    if (currentType !== '') {
-      entityOptionsHtml += '</optgroup>';
-    }
-
-    this.shadowRoot.innerHTML = `
-      <style>
-        .editor {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          padding: 16px;
-        }
-        .field {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .field label {
-          font-weight: 500;
-          font-size: 14px;
-          color: var(--primary-text-color);
-        }
-        .field .hint {
-          font-size: 11px;
-          color: var(--secondary-text-color);
-        }
-        select, input[type="text"] {
-          width: 100%;
-          padding: 10px 12px;
-          border: 1px solid var(--divider-color, #e0e0e0);
-          border-radius: 8px;
-          background: var(--card-background-color, white);
-          color: var(--primary-text-color);
-          font-size: 14px;
-          box-sizing: border-box;
-        }
-        select:focus, input[type="text"]:focus {
-          outline: none;
-          border-color: var(--primary-color, #03a9f4);
-          box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.2);
-        }
-        optgroup {
-          font-weight: bold;
-          color: var(--primary-text-color);
-        }
-        .checkbox-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 8px 0;
-        }
-        .checkbox-row input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-          cursor: pointer;
-          flex-shrink: 0;
-        }
-        .checkbox-row label {
-          font-size: 14px;
-          color: var(--primary-text-color);
-          cursor: pointer;
-          user-select: none;
-        }
-        .info-box {
-          background: rgba(33, 150, 243, 0.1);
-          border: 1px solid rgba(33, 150, 243, 0.3);
-          border-radius: 8px;
-          padding: 12px;
-          font-size: 12px;
-          color: var(--primary-text-color);
-        }
-        .info-box strong {
-          color: var(--primary-color, #03a9f4);
-        }
-        .no-entities {
-          text-align: center;
-          padding: 20px;
-          color: var(--secondary-text-color);
-        }
-        .no-entities .icon {
-          font-size: 32px;
-          margin-bottom: 8px;
-        }
-      </style>
-      
-      <div class="editor">
-        ${stockEntities.length === 0 ? `
-          <div class="no-entities">
-            <div class="icon">📊</div>
-            <div>Keine Aktien-Sensoren gefunden.</div>
-            <div style="margin-top: 8px; font-size: 12px;">
-              Füge zuerst Aktien über Stock Tracker hinzu:<br>
-              Einstellungen → Geräte & Dienste → Stock Tracker
-            </div>
-          </div>
-        ` : `
-          <div class="field">
-            <label>📊 Aktie / Index / Krypto auswählen</label>
-            <select id="entity">
-              ${entityOptionsHtml}
-            </select>
-            <span class="hint">${stockEntities.length} Assets verfügbar (Aktien, Indizes, ETFs, Krypto)</span>
-          </div>
-
-          <div class="field">
-            <label>🎨 Anzeige-Modus</label>
-            <select id="display_mode">
-              <option value="full" ${currentMode === 'full' ? 'selected' : ''}>
-                Vollständig - Alle Details
-              </option>
-              <option value="compact" ${currentMode === 'compact' ? 'selected' : ''}>
-                Kompakt - Kurs + Änderung
-              </option>
-              <option value="mini" ${currentMode === 'mini' ? 'selected' : ''}>
-                Mini - Nur eine Zeile
-              </option>
-            </select>
-          </div>
-
-          <div class="checkbox-row">
-            <input type="checkbox" id="show_indicators" ${showIndicators ? 'checked' : ''}>
-            <label for="show_indicators">📈 Technische Indikatoren anzeigen</label>
-          </div>
-
-          <div class="checkbox-row">
-            <input type="checkbox" id="show_chart" ${showChart ? 'checked' : ''}>
-            <label for="show_chart">📉 Chart-Bereich anzeigen</label>
-          </div>
-
-          <div class="field">
-            <label>Eigener Name (optional)</label>
-            <input type="text" id="name" value="${customName}" placeholder="z.B. Mein Portfolio Header">
-          </div>
-        `}
-
-        <div class="info-box">
-          💡 <strong>Tipp:</strong> Indizes wie DAX (^GDAXI) oder Dow Jones (^DJI) können als Überschrift für dein Dashboard verwendet werden!<br><br>
-          Weitere Assets hinzufügen unter:<br>
-          Einstellungen → Geräte & Dienste → Stock Tracker → <strong>Konfigurieren</strong>
-        </div>
-      </div>
-    `;
-
-    this._attachEventListeners();
-  }
-
-  _attachEventListeners() {
-    const entitySelect = this.shadowRoot.getElementById('entity');
-    if (entitySelect) {
-      entitySelect.addEventListener('change', (e) => this._valueChanged(e));
-    }
-
-    const modeSelect = this.shadowRoot.getElementById('display_mode');
-    if (modeSelect) {
-      modeSelect.addEventListener('change', (e) => this._valueChanged(e));
-    }
-
-    const indicatorsCheckbox = this.shadowRoot.getElementById('show_indicators');
-    if (indicatorsCheckbox) {
-      indicatorsCheckbox.addEventListener('change', (e) => this._valueChanged(e));
-    }
-
-    const chartCheckbox = this.shadowRoot.getElementById('show_chart');
-    if (chartCheckbox) {
-      chartCheckbox.addEventListener('change', (e) => this._valueChanged(e));
-    }
-
-    const nameInput = this.shadowRoot.getElementById('name');
-    if (nameInput) {
-      let timeout;
-      nameInput.addEventListener('input', (e) => {
-        clearTimeout(timeout);
-        timeout = setTimeout(() => this._valueChanged(e), 500);
-      });
-      nameInput.addEventListener('blur', (e) => {
-        clearTimeout(timeout);
-        this._valueChanged(e);
-      });
-    }
-  }
-
-  _valueChanged(e) {
-    if (!this._config) return;
-
-    const target = e.target;
-    const id = target.id;
-    const value = target.type === 'checkbox' ? target.checked : target.value;
-
-    const newConfig = { ...this._config };
-
-    if (value === '' && id === 'name') {
-      delete newConfig.name;
-    } else {
-      newConfig[id] = value;
-    }
-
-    this._config = newConfig;
-
-    const event = new CustomEvent('config-changed', {
-      detail: { config: newConfig },
-      bubbles: true,
-      composed: true,
-    });
-    this.dispatchEvent(event);
-  }
-}
-
-
-
-// =============================================================================
-// REGISTER CUSTOM ELEMENTS
-// =============================================================================
-
-if (!customElements.get('stock-tracker-card')) {
-  customElements.define('stock-tracker-card', StockTrackerCard);
-  console.info(
-    '%c 📊 STOCK-TRACKER-CARD %c v1.2.1 ',
-    'color: white; background: #1976d2; font-weight: bold; padding: 2px 6px; border-radius: 3px 0 0 3px;',
-    'color: #1976d2; background: white; font-weight: bold; padding: 2px 6px; border-radius: 0 3px 3px 0; border: 1px solid #1976d2;'
-  );
-}
-
-if (!customElements.get('stock-tracker-card-editor')) {
-  customElements.define('stock-tracker-card-editor', StockTrackerCardEditor);
-}
-
-// Für Lovelace Card Picker
-window.customCards = window.customCards || [];
-if (!window.customCards.find(c => c.type === 'stock-tracker-card')) {
-  window.customCards.push({
-    type: 'stock-tracker-card',
-    name: 'Stock Tracker Card',
-    description: 'Zeigt Aktienkurse mit Preis, Änderung, Trend und technischen Indikatoren',
-    preview: true,
-    documentationURL: 'https://github.com/richieam93/ha-stock-tracker',
-  });
 }
