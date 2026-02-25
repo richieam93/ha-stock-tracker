@@ -7,6 +7,11 @@ Creates 5 sensors per stock symbol:
   3. Trend Sensor     - Trend analysis (bullish/bearish/neutral)
   4. Volume Sensor    - Trading volume
   5. Indicators Sensor - Technical indicators (RSI, MACD, etc.)
+
+v2.0 Changes:
+  - Added circulating_supply, total_supply, max_supply attributes
+  - Market cap now always has a value (calculated from supply if needed)
+  - Better formatting for large numbers
 """
 from __future__ import annotations
 
@@ -65,19 +70,11 @@ async def async_setup_entry(
     entities = []
 
     for symbol in symbols:
-        # 1. Preis-Sensor (immer)
         entities.append(StockPriceSensor(coordinator, symbol))
-
-        # 2. Änderungs-Sensor (immer)
         entities.append(StockChangeSensor(coordinator, symbol))
-
-        # 3. Trend-Sensor (immer)
         entities.append(StockTrendSensor(coordinator, symbol))
-
-        # 4. Volumen-Sensor (immer)
         entities.append(StockVolumeSensor(coordinator, symbol))
 
-        # 5. Indikatoren-Sensor (optional)
         if show_indicators:
             entities.append(StockIndicatorsSensor(coordinator, symbol))
 
@@ -97,8 +94,6 @@ async def async_setup_entry(
 class StockBaseSensor(CoordinatorEntity, SensorEntity):
     """Base class for all stock sensors."""
 
-    # WICHTIG: False = Name wird DIREKT als entity_id verwendet
-    # True = Name wird an Device-Name angehängt (doppelt!)
     _attr_has_entity_name = False
 
     def __init__(
@@ -112,7 +107,6 @@ class StockBaseSensor(CoordinatorEntity, SensorEntity):
         self._symbol = symbol.upper()
         self._sensor_type = sensor_type
         
-        # Saubere Entity-ID: sensor.aapl_price, sensor.btc_usd_change
         clean_symbol = self._clean_symbol(symbol)
         self._attr_unique_id = f"{DOMAIN}_{clean_symbol}_{sensor_type}"
 
@@ -154,6 +148,7 @@ class StockBaseSensor(CoordinatorEntity, SensorEntity):
             return data.get(key, default)
         return default
 
+
 # =============================================================================
 # SENSOR 1: STOCK PRICE (Hauptsensor)
 # =============================================================================
@@ -163,7 +158,7 @@ class StockPriceSensor(StockBaseSensor):
     Main stock price sensor.
 
     State: Current stock price
-    Attributes: All fundamental data, market data, company info
+    Attributes: All fundamental data, market data, company info, supply data
     """
 
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -178,8 +173,6 @@ class StockPriceSensor(StockBaseSensor):
 
     @property
     def name(self) -> str:
-        """Kurzer Name = kurze entity_id."""
-        # Ergibt: sensor.aapl_price statt sensor.apple_inc_aapl_price
         return f"{self._symbol} Price"
 
     @property
@@ -238,6 +231,11 @@ class StockPriceSensor(StockBaseSensor):
         self._add_attr_formatted(attrs, data, "market_cap", self._format_large_number)
         self._add_attr(attrs, data, "shares_outstanding")
 
+        # --- Supply (Krypto) ---
+        self._add_attr(attrs, data, "circulating_supply")
+        self._add_attr(attrs, data, "total_supply")
+        self._add_attr(attrs, data, "max_supply")
+
         # --- Fundamentaldaten ---
         self._add_attr(attrs, data, "pe_ratio")
         self._add_attr(attrs, data, "forward_pe")
@@ -291,7 +289,9 @@ class StockPriceSensor(StockBaseSensor):
         value = data.get(key)
         if value is not None:
             attrs[attr_name or key] = value
-            attrs[f"{attr_name or key}_formatted"] = formatter(value)
+            formatted = formatter(value)
+            if formatted and formatted != "N/A":
+                attrs[f"{attr_name or key}_formatted"] = formatted
 
     @staticmethod
     def _format_large_number(value) -> str:
@@ -300,6 +300,8 @@ class StockPriceSensor(StockBaseSensor):
             return "N/A"
         try:
             value = float(value)
+            if value <= 0:
+                return "N/A"
             if value >= 1_000_000_000_000:
                 return f"{value / 1_000_000_000_000:.2f}T"
             elif value >= 1_000_000_000:
@@ -314,26 +316,16 @@ class StockPriceSensor(StockBaseSensor):
 
 
 # =============================================================================
-# SENSOR 2: STOCK CHANGE (Tagesänderung %)
+# SENSOR 2: STOCK CHANGE
 # =============================================================================
 
 class StockChangeSensor(StockBaseSensor):
-    """
-    Daily change percentage sensor.
-
-    State: Change percent today
-    Attributes: Absolute change, weekly/monthly/yearly changes
-    """
+    """Daily change percentage sensor."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "%"
 
-    def __init__(
-        self,
-        coordinator: StockDataCoordinator,
-        symbol: str,
-    ) -> None:
-        """Initialize change sensor."""
+    def __init__(self, coordinator: StockDataCoordinator, symbol: str) -> None:
         super().__init__(coordinator, symbol, SENSOR_CHANGE)
 
     @property
@@ -342,7 +334,6 @@ class StockChangeSensor(StockBaseSensor):
 
     @property
     def native_value(self) -> float | None:
-        """Return daily change percentage."""
         value = self._safe_get("change_percent")
         if value is not None:
             return round(value, 2)
@@ -350,7 +341,6 @@ class StockChangeSensor(StockBaseSensor):
 
     @property
     def icon(self) -> str:
-        """Return icon based on change direction."""
         value = self.native_value
         if value is not None:
             if value > 2:
@@ -365,40 +355,27 @@ class StockChangeSensor(StockBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return change details."""
         data = self._get_data()
         if not data:
             return {}
 
-        attrs = {
-            "symbol": self._symbol,
-        }
+        attrs = {"symbol": self._symbol}
 
-        # Absolute Änderung
         change = data.get("change")
         if change is not None:
             attrs["absolute_change"] = round(change, 4)
             attrs["currency"] = data.get("currency", "USD")
 
-        # Richtung & Stärke
         change_pct = data.get("change_percent")
         if change_pct is not None:
-            if change_pct > 5:
+            if abs(change_pct) > 5:
                 attrs["change_magnitude"] = "very_large"
-            elif change_pct > 2:
+            elif abs(change_pct) > 2:
                 attrs["change_magnitude"] = "large"
-            elif change_pct > 0.5:
+            elif abs(change_pct) > 0.5:
                 attrs["change_magnitude"] = "moderate"
-            elif change_pct > 0:
-                attrs["change_magnitude"] = "small"
-            elif change_pct > -0.5:
-                attrs["change_magnitude"] = "small"
-            elif change_pct > -2:
-                attrs["change_magnitude"] = "moderate"
-            elif change_pct > -5:
-                attrs["change_magnitude"] = "large"
             else:
-                attrs["change_magnitude"] = "very_large"
+                attrs["change_magnitude"] = "small"
 
             attrs["change_direction"] = (
                 "up" if change_pct > 0
@@ -406,7 +383,6 @@ class StockChangeSensor(StockBaseSensor):
                 else "flat"
             )
 
-        # Zeitraum-Änderungen
         for period in [
             "week_change_percent",
             "month_change_percent",
@@ -421,23 +397,13 @@ class StockChangeSensor(StockBaseSensor):
 
 
 # =============================================================================
-# SENSOR 3: STOCK TREND (Trend-Analyse)
+# SENSOR 3: STOCK TREND
 # =============================================================================
 
 class StockTrendSensor(StockBaseSensor):
-    """
-    Trend analysis sensor.
+    """Trend analysis sensor."""
 
-    State: Trend direction (bullish/bearish/neutral)
-    Attributes: Strength, confidence, support/resistance, moving averages
-    """
-
-    def __init__(
-        self,
-        coordinator: StockDataCoordinator,
-        symbol: str,
-    ) -> None:
-        """Initialize trend sensor."""
+    def __init__(self, coordinator: StockDataCoordinator, symbol: str) -> None:
         super().__init__(coordinator, symbol, SENSOR_TREND)
 
     @property
@@ -446,7 +412,6 @@ class StockTrendSensor(StockBaseSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return trend direction."""
         data = self._get_data()
         if data and data.get("trend"):
             return data["trend"].get("direction", "unknown")
@@ -454,7 +419,6 @@ class StockTrendSensor(StockBaseSensor):
 
     @property
     def icon(self) -> str:
-        """Return icon based on trend."""
         value = self.native_value
         icons = {
             "strong_bullish": ICON_ROCKET,
@@ -467,14 +431,12 @@ class StockTrendSensor(StockBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return trend analysis details."""
         data = self._get_data()
         if not data:
             return {}
 
         attrs = {"symbol": self._symbol}
 
-        # Trend-Daten
         trend = data.get("trend", {})
         if trend:
             attrs["trend_direction"] = trend.get("direction")
@@ -482,31 +444,20 @@ class StockTrendSensor(StockBaseSensor):
             attrs["trend_confidence"] = trend.get("confidence")
             attrs["volatility"] = trend.get("volatility")
             attrs["volatility_level"] = trend.get("volatility_level")
-
-            # Sub-Trends
             attrs["short_term_trend"] = trend.get("short_term")
             attrs["medium_term_trend"] = trend.get("medium_term")
             attrs["long_term_trend"] = trend.get("long_term")
 
-            # Moving Averages
-            for ma_key in [
-                "sma_5", "sma_10", "sma_20", "sma_50",
-                "ema_12", "ema_26"
-            ]:
+            for ma_key in ["sma_5", "sma_10", "sma_20", "sma_50", "ema_12", "ema_26"]:
                 value = trend.get(ma_key)
                 if value is not None:
                     attrs[ma_key] = value
 
-            # Support / Resistance
-            for sr_key in [
-                "support_1", "support_2",
-                "resistance_1", "resistance_2"
-            ]:
+            for sr_key in ["support_1", "support_2", "resistance_1", "resistance_2"]:
                 value = trend.get(sr_key)
                 if value is not None:
                     attrs[sr_key] = value
 
-        # Preis relativ zu Durchschnitten
         price = data.get("price")
         avg_50 = data.get("50_day_avg")
         avg_200 = data.get("200_day_avg")
@@ -522,16 +473,12 @@ class StockTrendSensor(StockBaseSensor):
                 ((price - avg_200) / avg_200) * 100, 2
             )
 
-        # Empfehlung
         attrs["overall_signal"] = data.get("overall_signal", "N/A")
-
-        # Zusammenfassung (Textform)
         attrs["summary"] = self._build_summary(data)
 
         return {k: v for k, v in attrs.items() if v is not None}
 
     def _build_summary(self, data: dict) -> list[str]:
-        """Build human-readable trend summary."""
         signals = []
         trend = data.get("trend", {})
         indicators = data.get("indicators", {})
@@ -539,7 +486,6 @@ class StockTrendSensor(StockBaseSensor):
         direction = trend.get("direction", "unknown")
         strength = trend.get("strength", 0)
 
-        # Trend
         if direction == "strong_bullish":
             signals.append(f"🚀 Starker Aufwärtstrend (Stärke: {strength}/10)")
         elif direction == "bullish":
@@ -551,7 +497,6 @@ class StockTrendSensor(StockBaseSensor):
         else:
             signals.append("➡️ Seitwärtsbewegung")
 
-        # RSI
         rsi = indicators.get("rsi_14")
         if rsi is not None:
             if rsi > 70:
@@ -561,21 +506,18 @@ class StockTrendSensor(StockBaseSensor):
             else:
                 signals.append(f"✅ RSI {rsi:.0f}: Neutral")
 
-        # MACD
         macd_trend = indicators.get("macd_trend")
         if macd_trend == "bullish":
             signals.append("📈 MACD: Kaufsignal")
         elif macd_trend == "bearish":
             signals.append("📉 MACD: Verkaufssignal")
 
-        # Volatilität
         vol_level = trend.get("volatility_level")
         if vol_level == "high":
             signals.append("⚡ Hohe Volatilität - Vorsicht!")
         elif vol_level == "low":
             signals.append("😴 Niedrige Volatilität")
 
-        # Gesamtsignal
         overall = data.get("overall_signal", "N/A")
         signals.append(f"💡 Gesamtsignal: {overall}")
 
@@ -583,25 +525,15 @@ class StockTrendSensor(StockBaseSensor):
 
 
 # =============================================================================
-# SENSOR 4: STOCK VOLUME (Handelsvolumen)
+# SENSOR 4: STOCK VOLUME
 # =============================================================================
 
 class StockVolumeSensor(StockBaseSensor):
-    """
-    Trading volume sensor.
-
-    State: Current trading volume
-    Attributes: Average volume, volume ratio, volume trend
-    """
+    """Trading volume sensor."""
 
     _attr_state_class = SensorStateClass.MEASUREMENT
 
-    def __init__(
-        self,
-        coordinator: StockDataCoordinator,
-        symbol: str,
-    ) -> None:
-        """Initialize volume sensor."""
+    def __init__(self, coordinator: StockDataCoordinator, symbol: str) -> None:
         super().__init__(coordinator, symbol, SENSOR_VOLUME)
 
     @property
@@ -610,29 +542,24 @@ class StockVolumeSensor(StockBaseSensor):
 
     @property
     def native_value(self) -> int | None:
-        """Return current volume."""
         return self._safe_get("volume")
 
     @property
     def native_unit_of_measurement(self) -> str:
-        """Return unit."""
         return "shares"
 
     @property
     def icon(self) -> str:
-        """Return icon."""
         return ICON_VOLUME
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return volume analysis."""
         data = self._get_data()
         if not data:
             return {}
 
         attrs = {"symbol": self._symbol}
 
-        # Volumen-Daten
         volume = data.get("volume")
         avg_volume = data.get("avg_volume")
 
@@ -644,7 +571,6 @@ class StockVolumeSensor(StockBaseSensor):
             attrs["avg_volume"] = avg_volume
             attrs["avg_volume_formatted"] = self._format_volume(avg_volume)
 
-            # Volume Ratio
             if volume and avg_volume > 0:
                 ratio = round(volume / avg_volume, 2)
                 attrs["volume_ratio"] = ratio
@@ -661,14 +587,12 @@ class StockVolumeSensor(StockBaseSensor):
                 else:
                     attrs["volume_level"] = "very_low"
 
-        # Umsatz (Volumen × Preis)
         price = data.get("price")
         if volume and price:
             turnover = volume * price
             attrs["turnover"] = turnover
             attrs["turnover_formatted"] = self._format_volume(turnover)
 
-        # Volume Analyse aus Coordinator
         vol_analysis = data.get("volume_analysis", {})
         if vol_analysis:
             attrs["volume_trend"] = vol_analysis.get("trend")
@@ -679,7 +603,6 @@ class StockVolumeSensor(StockBaseSensor):
 
     @staticmethod
     def _format_volume(value) -> str:
-        """Format volume number."""
         if value is None:
             return "N/A"
         try:
@@ -696,23 +619,13 @@ class StockVolumeSensor(StockBaseSensor):
 
 
 # =============================================================================
-# SENSOR 5: STOCK INDICATORS (Technische Indikatoren)
+# SENSOR 5: STOCK INDICATORS
 # =============================================================================
 
 class StockIndicatorsSensor(StockBaseSensor):
-    """
-    Technical indicators sensor.
+    """Technical indicators sensor."""
 
-    State: Overall signal (BUY/HOLD/SELL)
-    Attributes: RSI, MACD, Bollinger Bands, Stochastic, etc.
-    """
-
-    def __init__(
-        self,
-        coordinator: StockDataCoordinator,
-        symbol: str,
-    ) -> None:
-        """Initialize indicators sensor."""
+    def __init__(self, coordinator: StockDataCoordinator, symbol: str) -> None:
         super().__init__(coordinator, symbol, SENSOR_INDICATORS)
 
     @property
@@ -721,12 +634,10 @@ class StockIndicatorsSensor(StockBaseSensor):
 
     @property
     def native_value(self) -> str | None:
-        """Return overall signal."""
         return self._safe_get("overall_signal", "N/A")
 
     @property
     def icon(self) -> str:
-        """Return icon based on signal."""
         signal = self.native_value
         if signal in ("BUY", "STRONG_BUY"):
             return "mdi:thumb-up"
@@ -736,7 +647,6 @@ class StockIndicatorsSensor(StockBaseSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return all technical indicators."""
         data = self._get_data()
         if not data:
             return {}
@@ -834,7 +744,7 @@ class StockIndicatorsSensor(StockBaseSensor):
             if value is not None:
                 attrs[ema] = round(value, 2)
 
-        # === ADX (Trend-Stärke) ===
+        # === ADX ===
         adx = indicators.get("adx")
         if adx is not None:
             attrs["adx"] = round(adx, 2)
@@ -847,7 +757,7 @@ class StockIndicatorsSensor(StockBaseSensor):
             else:
                 attrs["adx_interpretation"] = "Schwacher/Kein Trend"
 
-        # === ATR (Volatilität) ===
+        # === ATR ===
         atr = indicators.get("atr")
         if atr is not None:
             attrs["atr_14"] = round(atr, 4)
@@ -871,20 +781,13 @@ class StockIndicatorsSensor(StockBaseSensor):
         attrs["bearish_indicators"] = bear_count
         attrs["neutral_indicators"] = neutral_count
 
-        # Zusammenfassung als Liste
-        attrs["analysis_summary"] = self._build_indicator_summary(
-            attrs, data
-        )
+        attrs["analysis_summary"] = self._build_indicator_summary(attrs, data)
 
         return {k: v for k, v in attrs.items() if v is not None}
 
-    def _build_indicator_summary(
-        self, attrs: dict, data: dict
-    ) -> list[str]:
-        """Build indicator summary as list of strings."""
+    def _build_indicator_summary(self, attrs: dict, data: dict) -> list[str]:
         summary = []
 
-        # RSI
         rsi_signal = attrs.get("rsi_signal")
         rsi_value = attrs.get("rsi_14")
         if rsi_signal and rsi_value:
@@ -893,28 +796,23 @@ class StockIndicatorsSensor(StockBaseSensor):
             )
             summary.append(f"{emoji} RSI: {rsi_value:.1f} ({rsi_signal})")
 
-        # MACD
         macd_trend = attrs.get("macd_trend")
         if macd_trend:
             emoji = "📈" if macd_trend == "bullish" else "📉"
             summary.append(f"{emoji} MACD: {macd_trend}")
 
-        # Bollinger
         bb_pos = attrs.get("bollinger_position")
         if bb_pos:
             summary.append(f"📊 Bollinger: {bb_pos}")
 
-        # ADX
         adx_interp = attrs.get("adx_interpretation")
         if adx_interp:
             summary.append(f"💪 ADX: {adx_interp}")
 
-        # Stochastic
         stoch_signal = attrs.get("stochastic_signal")
         if stoch_signal:
             summary.append(f"📊 Stochastic: {stoch_signal}")
 
-        # Gesamtsignal
         overall = data.get("overall_signal", "N/A")
         bull = attrs.get("bullish_indicators", 0)
         bear = attrs.get("bearish_indicators", 0)
