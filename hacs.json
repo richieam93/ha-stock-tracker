@@ -6,6 +6,7 @@
   "filename": "stock_tracker.zip",
   "content_in_root": false,
   "domains": ["sensor"],
+  "filename": "stock-tracker-card.js",
   "country": ["DE", "AT", "CH", "US", "GB"],
   "iot_class": "cloud_polling"
 }
