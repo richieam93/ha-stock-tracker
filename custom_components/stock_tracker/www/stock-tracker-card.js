@@ -1078,7 +1078,6 @@ class StockTrackerCardEditor extends HTMLElement {
 
   setConfig(config) {
     this._config = { ...config };
-    // Nur rendern wenn hass bereits verfügbar ist
     if (this._hass) {
       this._render();
     }
@@ -1088,8 +1087,6 @@ class StockTrackerCardEditor extends HTMLElement {
     const firstTime = !this._hass;
     this._hass = hass;
     
-    // Beim ersten Mal immer rendern
-    // Danach nur wenn noch nicht gerendert wurde
     if (firstTime || !this.shadowRoot.querySelector('.editor')) {
       this._render();
     }
@@ -1104,38 +1101,46 @@ class StockTrackerCardEditor extends HTMLElement {
     const entities = [];
 
     for (const [entityId, state] of Object.entries(this._hass.states)) {
-      // Nur Sensoren die mit _price enden
-      if (!entityId.startsWith('sensor.') || !entityId.endsWith('_price')) {
+      // Nur Sensoren
+      if (!entityId.startsWith('sensor.')) {
         continue;
       }
 
       const attrs = state.attributes || {};
       
-      // Prüfe ob es ein Stock Tracker Sensor ist
+      // Prüfe ob es ein Stock Tracker Sensor ist anhand der Attribute
+      // Das ist die zuverlässigste Methode!
       const isStockSensor = (
-        attrs.symbol !== undefined ||
-        attrs.company_name !== undefined ||
-        attrs.change_percent !== undefined ||
-        attrs.previous_close !== undefined ||
-        attrs.exchange !== undefined ||
-        attrs.data_source !== undefined
+        attrs.symbol !== undefined &&
+        (
+          attrs.change_percent !== undefined ||
+          attrs.previous_close !== undefined ||
+          attrs.data_source !== undefined ||
+          attrs.overall_signal !== undefined ||
+          attrs.company_name !== undefined
+        )
       );
 
-      // Auch akzeptieren wenn es _price im Namen hat (Fallback)
-      if (isStockSensor || entityId.match(/sensor\.\w+_price$/)) {
-        const symbol = attrs.symbol || 
-          entityId.replace('sensor.', '').replace('_price', '').toUpperCase().replace(/_/g, '.');
-        const name = attrs.company_name || symbol;
+      if (isStockSensor) {
+        const symbol = attrs.symbol || entityId;
+        const name = attrs.company_name || attrs.friendly_name || symbol;
         const price = state.state;
         const currency = attrs.currency || 'USD';
         const change = attrs.change_percent;
+        const quoteType = attrs.quote_type || 'EQUITY';
 
-        let label = `${symbol}`;
-        if (name && name !== symbol) {
+        // Icon basierend auf Typ
+        let typeIcon = '📈';
+        if (quoteType === 'CRYPTOCURRENCY') typeIcon = '🪙';
+        else if (quoteType === 'ETF') typeIcon = '📊';
+        else if (quoteType === 'INDEX') typeIcon = '📉';
+
+        let label = `${typeIcon} ${symbol}`;
+        if (name && name !== symbol && !name.includes(symbol)) {
           label += ` - ${name}`;
         }
         if (price && price !== 'unavailable' && price !== 'unknown') {
-          label += ` (${price} ${currency}`;
+          label += ` (${parseFloat(price).toFixed(2)} ${currency}`;
           if (change !== undefined && change !== null) {
             const sign = parseFloat(change) >= 0 ? '+' : '';
             label += `, ${sign}${parseFloat(change).toFixed(2)}%`;
@@ -1148,19 +1153,25 @@ class StockTrackerCardEditor extends HTMLElement {
           symbol: symbol,
           name: name,
           label: label,
+          type: quoteType,
         });
       }
     }
 
-    // Alphabetisch sortieren
-    entities.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    // Sortieren: Erst nach Typ, dann alphabetisch
+    entities.sort((a, b) => {
+      if (a.type !== b.type) {
+        const typeOrder = { 'INDEX': 0, 'EQUITY': 1, 'ETF': 2, 'CRYPTOCURRENCY': 3 };
+        return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
+      }
+      return a.symbol.localeCompare(b.symbol);
+    });
     
     console.log('Stock Tracker Editor: Gefundene Entities:', entities.length, entities);
     return entities;
   }
 
   _render() {
-    // Warten bis hass verfügbar ist
     if (!this._hass) {
       this.shadowRoot.innerHTML = `
         <div style="padding: 16px; text-align: center; color: var(--secondary-text-color);">
@@ -1177,14 +1188,33 @@ class StockTrackerCardEditor extends HTMLElement {
     const showChart = this._config.show_chart !== false;
     const customName = this._config.name || '';
 
-    // Entity-Optionen HTML erstellen
+    // Entity-Optionen HTML erstellen mit Gruppierung
     let entityOptionsHtml = '<option value="">-- Bitte wählen --</option>';
+    
+    let currentType = '';
     stockEntities.forEach(e => {
+      // Gruppierung nach Typ
+      if (e.type !== currentType) {
+        if (currentType !== '') {
+          entityOptionsHtml += '</optgroup>';
+        }
+        const typeLabels = {
+          'INDEX': '📉 Indizes',
+          'EQUITY': '📈 Aktien',
+          'ETF': '📊 ETFs',
+          'CRYPTOCURRENCY': '🪙 Kryptowährungen'
+        };
+        entityOptionsHtml += `<optgroup label="${typeLabels[e.type] || e.type}">`;
+        currentType = e.type;
+      }
+      
       const selected = e.id === currentEntity ? 'selected' : '';
-      // HTML-Escape für Sicherheit
       const safeLabel = e.label.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       entityOptionsHtml += `<option value="${e.id}" ${selected}>${safeLabel}</option>`;
     });
+    if (currentType !== '') {
+      entityOptionsHtml += '</optgroup>';
+    }
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1222,6 +1252,10 @@ class StockTrackerCardEditor extends HTMLElement {
           outline: none;
           border-color: var(--primary-color, #03a9f4);
           box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.2);
+        }
+        optgroup {
+          font-weight: bold;
+          color: var(--primary-text-color);
         }
         .checkbox-row {
           display: flex;
@@ -1261,14 +1295,6 @@ class StockTrackerCardEditor extends HTMLElement {
           font-size: 32px;
           margin-bottom: 8px;
         }
-        .debug-info {
-          font-size: 10px;
-          color: var(--disabled-text-color);
-          margin-top: 8px;
-          padding: 8px;
-          background: var(--secondary-background-color);
-          border-radius: 4px;
-        }
       </style>
       
       <div class="editor">
@@ -1280,21 +1306,18 @@ class StockTrackerCardEditor extends HTMLElement {
               Füge zuerst Aktien über Stock Tracker hinzu:<br>
               Einstellungen → Geräte & Dienste → Stock Tracker
             </div>
-            <div class="debug-info">
-              Debug: ${Object.keys(this._hass.states).filter(e => e.endsWith('_price')).join(', ') || 'Keine _price Sensoren gefunden'}
-            </div>
           </div>
         ` : `
           <div class="field">
-            <label for="entity-select">📊 Aktie auswählen</label>
+            <label>📊 Aktie / Index / Krypto auswählen</label>
             <select id="entity">
               ${entityOptionsHtml}
             </select>
-            <span class="hint">${stockEntities.length} Aktie${stockEntities.length !== 1 ? 'n' : ''} verfügbar</span>
+            <span class="hint">${stockEntities.length} Assets verfügbar (Aktien, Indizes, ETFs, Krypto)</span>
           </div>
 
           <div class="field">
-            <label for="display-mode-select">🎨 Anzeige-Modus</label>
+            <label>🎨 Anzeige-Modus</label>
             <select id="display_mode">
               <option value="full" ${currentMode === 'full' ? 'selected' : ''}>
                 Vollständig - Alle Details
@@ -1319,13 +1342,14 @@ class StockTrackerCardEditor extends HTMLElement {
           </div>
 
           <div class="field">
-            <label for="custom-name">Eigener Name (optional)</label>
-            <input type="text" id="name" value="${customName}" placeholder="z.B. Meine Apple Aktie">
+            <label>Eigener Name (optional)</label>
+            <input type="text" id="name" value="${customName}" placeholder="z.B. Mein Portfolio Header">
           </div>
         `}
 
         <div class="info-box">
-          💡 <strong>Tipp:</strong> Weitere Aktien hinzufügen unter:<br>
+          💡 <strong>Tipp:</strong> Indizes wie DAX (^GDAXI) oder Dow Jones (^DJI) können als Überschrift für dein Dashboard verwendet werden!<br><br>
+          Weitere Assets hinzufügen unter:<br>
           Einstellungen → Geräte & Dienste → Stock Tracker → <strong>Konfigurieren</strong>
         </div>
       </div>
@@ -1335,19 +1359,16 @@ class StockTrackerCardEditor extends HTMLElement {
   }
 
   _attachEventListeners() {
-    // Entity Select
     const entitySelect = this.shadowRoot.getElementById('entity');
     if (entitySelect) {
       entitySelect.addEventListener('change', (e) => this._valueChanged(e));
     }
 
-    // Display Mode Select
     const modeSelect = this.shadowRoot.getElementById('display_mode');
     if (modeSelect) {
       modeSelect.addEventListener('change', (e) => this._valueChanged(e));
     }
 
-    // Checkboxen
     const indicatorsCheckbox = this.shadowRoot.getElementById('show_indicators');
     if (indicatorsCheckbox) {
       indicatorsCheckbox.addEventListener('change', (e) => this._valueChanged(e));
@@ -1358,7 +1379,6 @@ class StockTrackerCardEditor extends HTMLElement {
       chartCheckbox.addEventListener('change', (e) => this._valueChanged(e));
     }
 
-    // Name Input mit Debounce
     const nameInput = this.shadowRoot.getElementById('name');
     if (nameInput) {
       let timeout;
@@ -1370,10 +1390,6 @@ class StockTrackerCardEditor extends HTMLElement {
         clearTimeout(timeout);
         this._valueChanged(e);
       });
-      // Prevent re-render on focus
-      nameInput.addEventListener('focus', (e) => {
-        e.stopPropagation();
-      });
     }
   }
 
@@ -1384,7 +1400,6 @@ class StockTrackerCardEditor extends HTMLElement {
     const id = target.id;
     const value = target.type === 'checkbox' ? target.checked : target.value;
 
-    // Neue Config erstellen
     const newConfig = { ...this._config };
 
     if (value === '' && id === 'name') {
@@ -1395,7 +1410,6 @@ class StockTrackerCardEditor extends HTMLElement {
 
     this._config = newConfig;
 
-    // Event dispatchen
     const event = new CustomEvent('config-changed', {
       detail: { config: newConfig },
       bubbles: true,
