@@ -1065,7 +1065,7 @@ class StockTrackerCard extends HTMLElement {
 
 
 // =============================================================================
-// CARD EDITOR - KOMPLETT NEU GESCHRIEBEN
+// CARD EDITOR 
 // =============================================================================
 
 class StockTrackerCardEditor extends HTMLElement {
@@ -1074,45 +1074,57 @@ class StockTrackerCardEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = {};
     this._hass = null;
-    this._rendered = false;
   }
 
   setConfig(config) {
     this._config = { ...config };
-    this._render();
+    // Nur rendern wenn hass bereits verfügbar ist
+    if (this._hass) {
+      this._render();
+    }
   }
 
   set hass(hass) {
+    const firstTime = !this._hass;
     this._hass = hass;
-    // NUR beim ersten Mal rendern, nicht bei jedem hass-Update!
-    if (!this._rendered) {
+    
+    // Beim ersten Mal immer rendern
+    // Danach nur wenn noch nicht gerendert wurde
+    if (firstTime || !this.shadowRoot.querySelector('.editor')) {
       this._render();
     }
   }
 
   _getStockEntities() {
-    if (!this._hass || !this._hass.states) return [];
+    if (!this._hass || !this._hass.states) {
+      console.log('Stock Tracker Editor: hass oder states nicht verfügbar');
+      return [];
+    }
 
     const entities = [];
 
     for (const [entityId, state] of Object.entries(this._hass.states)) {
+      // Nur Sensoren die mit _price enden
       if (!entityId.startsWith('sensor.') || !entityId.endsWith('_price')) {
         continue;
       }
 
       const attrs = state.attributes || {};
       
+      // Prüfe ob es ein Stock Tracker Sensor ist
       const isStockSensor = (
         attrs.symbol !== undefined ||
         attrs.company_name !== undefined ||
         attrs.change_percent !== undefined ||
         attrs.previous_close !== undefined ||
-        attrs.exchange !== undefined
+        attrs.exchange !== undefined ||
+        attrs.data_source !== undefined
       );
 
-      if (isStockSensor || entityId.includes('_price')) {
+      // Auch akzeptieren wenn es _price im Namen hat (Fallback)
+      if (isStockSensor || entityId.match(/sensor\.\w+_price$/)) {
         const symbol = attrs.symbol || 
-          entityId.replace('sensor.', '').replace('_price', '').toUpperCase();
+          entityId.replace('sensor.', '').replace('_price', '').toUpperCase().replace(/_/g, '.');
         const name = attrs.company_name || symbol;
         const price = state.state;
         const currency = attrs.currency || 'USD';
@@ -1140,17 +1152,39 @@ class StockTrackerCardEditor extends HTMLElement {
       }
     }
 
+    // Alphabetisch sortieren
     entities.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    
+    console.log('Stock Tracker Editor: Gefundene Entities:', entities.length, entities);
     return entities;
   }
 
   _render() {
+    // Warten bis hass verfügbar ist
+    if (!this._hass) {
+      this.shadowRoot.innerHTML = `
+        <div style="padding: 16px; text-align: center; color: var(--secondary-text-color);">
+          Lade...
+        </div>
+      `;
+      return;
+    }
+
     const stockEntities = this._getStockEntities();
     const currentEntity = this._config.entity || '';
     const currentMode = this._config.display_mode || 'compact';
     const showIndicators = this._config.show_indicators !== false;
     const showChart = this._config.show_chart !== false;
     const customName = this._config.name || '';
+
+    // Entity-Optionen HTML erstellen
+    let entityOptionsHtml = '<option value="">-- Bitte wählen --</option>';
+    stockEntities.forEach(e => {
+      const selected = e.id === currentEntity ? 'selected' : '';
+      // HTML-Escape für Sicherheit
+      const safeLabel = e.label.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      entityOptionsHtml += `<option value="${e.id}" ${selected}>${safeLabel}</option>`;
+    });
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -1184,7 +1218,7 @@ class StockTrackerCardEditor extends HTMLElement {
           font-size: 14px;
           box-sizing: border-box;
         }
-        select:focus, input:focus {
+        select:focus, input[type="text"]:focus {
           outline: none;
           border-color: var(--primary-color, #03a9f4);
           box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.2);
@@ -1199,11 +1233,13 @@ class StockTrackerCardEditor extends HTMLElement {
           width: 18px;
           height: 18px;
           cursor: pointer;
+          flex-shrink: 0;
         }
         .checkbox-row label {
           font-size: 14px;
           color: var(--primary-text-color);
           cursor: pointer;
+          user-select: none;
         }
         .info-box {
           background: rgba(33, 150, 243, 0.1);
@@ -1225,6 +1261,14 @@ class StockTrackerCardEditor extends HTMLElement {
           font-size: 32px;
           margin-bottom: 8px;
         }
+        .debug-info {
+          font-size: 10px;
+          color: var(--disabled-text-color);
+          margin-top: 8px;
+          padding: 8px;
+          background: var(--secondary-background-color);
+          border-radius: 4px;
+        }
       </style>
       
       <div class="editor">
@@ -1236,23 +1280,21 @@ class StockTrackerCardEditor extends HTMLElement {
               Füge zuerst Aktien über Stock Tracker hinzu:<br>
               Einstellungen → Geräte & Dienste → Stock Tracker
             </div>
+            <div class="debug-info">
+              Debug: ${Object.keys(this._hass.states).filter(e => e.endsWith('_price')).join(', ') || 'Keine _price Sensoren gefunden'}
+            </div>
           </div>
         ` : `
           <div class="field">
-            <label>📊 Aktie auswählen</label>
+            <label for="entity-select">📊 Aktie auswählen</label>
             <select id="entity">
-              <option value="">-- Bitte wählen --</option>
-              ${stockEntities.map(e => `
-                <option value="${e.id}" ${e.id === currentEntity ? 'selected' : ''}>
-                  ${e.label}
-                </option>
-              `).join('')}
+              ${entityOptionsHtml}
             </select>
-            <span class="hint">${stockEntities.length} Aktien verfügbar</span>
+            <span class="hint">${stockEntities.length} Aktie${stockEntities.length !== 1 ? 'n' : ''} verfügbar</span>
           </div>
 
           <div class="field">
-            <label>🎨 Anzeige-Modus</label>
+            <label for="display-mode-select">🎨 Anzeige-Modus</label>
             <select id="display_mode">
               <option value="full" ${currentMode === 'full' ? 'selected' : ''}>
                 Vollständig - Alle Details
@@ -1277,7 +1319,7 @@ class StockTrackerCardEditor extends HTMLElement {
           </div>
 
           <div class="field">
-            <label>Eigener Name (optional)</label>
+            <label for="custom-name">Eigener Name (optional)</label>
             <input type="text" id="name" value="${customName}" placeholder="z.B. Meine Apple Aktie">
           </div>
         `}
@@ -1289,33 +1331,48 @@ class StockTrackerCardEditor extends HTMLElement {
       </div>
     `;
 
-    this._rendered = true;
     this._attachEventListeners();
   }
 
   _attachEventListeners() {
-    // Select-Felder
-    this.shadowRoot.querySelectorAll('select').forEach(el => {
-      el.addEventListener('change', (e) => this._valueChanged(e));
-    });
+    // Entity Select
+    const entitySelect = this.shadowRoot.getElementById('entity');
+    if (entitySelect) {
+      entitySelect.addEventListener('change', (e) => this._valueChanged(e));
+    }
+
+    // Display Mode Select
+    const modeSelect = this.shadowRoot.getElementById('display_mode');
+    if (modeSelect) {
+      modeSelect.addEventListener('change', (e) => this._valueChanged(e));
+    }
 
     // Checkboxen
-    this.shadowRoot.querySelectorAll('input[type="checkbox"]').forEach(el => {
-      el.addEventListener('change', (e) => this._valueChanged(e));
-    });
+    const indicatorsCheckbox = this.shadowRoot.getElementById('show_indicators');
+    if (indicatorsCheckbox) {
+      indicatorsCheckbox.addEventListener('change', (e) => this._valueChanged(e));
+    }
 
-    // Text-Input mit Debounce
+    const chartCheckbox = this.shadowRoot.getElementById('show_chart');
+    if (chartCheckbox) {
+      chartCheckbox.addEventListener('change', (e) => this._valueChanged(e));
+    }
+
+    // Name Input mit Debounce
     const nameInput = this.shadowRoot.getElementById('name');
     if (nameInput) {
       let timeout;
       nameInput.addEventListener('input', (e) => {
         clearTimeout(timeout);
-        timeout = setTimeout(() => this._valueChanged(e), 300);
+        timeout = setTimeout(() => this._valueChanged(e), 500);
       });
-      // Auch bei blur sofort speichern
       nameInput.addEventListener('blur', (e) => {
         clearTimeout(timeout);
         this._valueChanged(e);
+      });
+      // Prevent re-render on focus
+      nameInput.addEventListener('focus', (e) => {
+        e.stopPropagation();
       });
     }
   }
@@ -1324,18 +1381,21 @@ class StockTrackerCardEditor extends HTMLElement {
     if (!this._config) return;
 
     const target = e.target;
+    const id = target.id;
     const value = target.type === 'checkbox' ? target.checked : target.value;
 
+    // Neue Config erstellen
     const newConfig = { ...this._config };
 
-    if (value === '' && target.id === 'name') {
+    if (value === '' && id === 'name') {
       delete newConfig.name;
     } else {
-      newConfig[target.id] = value;
+      newConfig[id] = value;
     }
 
     this._config = newConfig;
 
+    // Event dispatchen
     const event = new CustomEvent('config-changed', {
       detail: { config: newConfig },
       bubbles: true,
