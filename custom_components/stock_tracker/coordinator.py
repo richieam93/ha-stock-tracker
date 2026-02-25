@@ -3,19 +3,16 @@ Data Update Coordinator for Stock Tracker.
 
 Fetches stock data from multiple sources with automatic fallback.
 Sources (no API key needed):
-  1. Yahoo Finance (yfinance library)
-  2. Yahoo Finance Search API
-  3. Google Finance (web scraping)
-  4. Fallback: Basic data from multiple sources
-
-v2.0 Changes:
-  - Market cap fix: multiple fallbacks + calculation from supply
-  - Crypto supply data (circulating, total, max)
-  - Better data enrichment for all sources
+  - Crypto: CoinGecko, CoinPaprika (auto-search for new coins)
+  - Stocks: Yahoo Finance (yfinance), Yahoo v8 Chart API
+  
+Automatically detects asset type and uses best source.
+All symbols are searchable - stocks AND crypto!
 """
 from __future__ import annotations
 
 import logging
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -40,13 +37,153 @@ from .technical import TechnicalAnalysis
 
 _LOGGER = logging.getLogger(__name__)
 
-# HTTP Headers für Web Requests
+# HTTP Headers
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
-    )
+    ),
+    "Accept": "application/json",
+}
+
+# =============================================================================
+# CRYPTO SYMBOL MAPPING (Yahoo Symbol -> CoinGecko ID)
+# This is a cache - new coins are auto-discovered and added!
+# =============================================================================
+
+CRYPTO_MAPPING = {
+    # Top 100 Cryptos (pre-cached for speed)
+    "BTC": "bitcoin",
+    "ETH": "ethereum",
+    "BNB": "binancecoin",
+    "XRP": "ripple",
+    "ADA": "cardano",
+    "SOL": "solana",
+    "DOGE": "dogecoin",
+    "DOT": "polkadot",
+    "MATIC": "matic-network",
+    "AVAX": "avalanche-2",
+    "LINK": "chainlink",
+    "UNI": "uniswap",
+    "ATOM": "cosmos",
+    "LTC": "litecoin",
+    "ALGO": "algorand",
+    "XLM": "stellar",
+    "VET": "vechain",
+    "MANA": "decentraland",
+    "SAND": "the-sandbox",
+    "AAVE": "aave",
+    "FTM": "fantom",
+    "NEAR": "near",
+    "ICP": "internet-computer",
+    "FIL": "filecoin",
+    "HBAR": "hedera-hashgraph",
+    "APE": "apecoin",
+    "ARB": "arbitrum",
+    "OP": "optimism",
+    "SUI": "sui",
+    "SEI": "sei-network",
+    "CHZ": "chiliz",
+    "SHIB": "shiba-inu",
+    "TRX": "tron",
+    "ETC": "ethereum-classic",
+    "XMR": "monero",
+    "BCH": "bitcoin-cash",
+    "PEPE": "pepe",
+    "IMX": "immutable-x",
+    "INJ": "injective-protocol",
+    "RUNE": "thorchain",
+    "GRT": "the-graph",
+    "MKR": "maker",
+    "THETA": "theta-token",
+    "FET": "fetch-ai",
+    "RENDER": "render-token",
+    "TIA": "celestia",
+    "STX": "stacks",
+    "EGLD": "elrond-erd-2",
+    "FLOW": "flow",
+    "AXS": "axie-infinity",
+    "NEO": "neo",
+    "KAVA": "kava",
+    "XTZ": "tezos",
+    "EOS": "eos",
+    "CAKE": "pancakeswap-token",
+    "CRV": "curve-dao-token",
+    "GALA": "gala",
+    "ENJ": "enjincoin",
+    "1INCH": "1inch",
+    "COMP": "compound-governance-token",
+    "SNX": "havven",
+    "BAT": "basic-attention-token",
+    "ZEC": "zcash",
+    "DASH": "dash",
+    "WAVES": "waves",
+    "IOTA": "iota",
+    "ZIL": "zilliqa",
+    "ENS": "ethereum-name-service",
+    "LDO": "lido-dao",
+    "RPL": "rocket-pool",
+    "GMX": "gmx",
+    "DYDX": "dydx",
+    "CRO": "crypto-com-chain",
+    "QNT": "quant-network",
+    "MINA": "mina-protocol",
+    "WOO": "woo-network",
+    "ROSE": "oasis-network",
+    "CELO": "celo",
+    "ONE": "harmony",
+    "IOTX": "iotex",
+    "JASMY": "jasmycoin",
+    "HOT": "holotoken",
+    "ANKR": "ankr",
+    "AUDIO": "audius",
+    "MASK": "mask-network",
+    "STORJ": "storj",
+    "SKL": "skale",
+    "OCEAN": "ocean-protocol",
+    "FLUX": "zelcash",
+    "ICX": "icon",
+    "ONT": "ontology",
+    "ZRX": "0x",
+    "SXP": "swipe",
+    "RSR": "reserve-rights-token",
+    "BAND": "band-protocol",
+    "CELR": "celer-network",
+    "RLC": "iexec-rlc",
+    "NKN": "nkn",
+    "CTSI": "cartesi",
+    "REQ": "request-network",
+    "POND": "marlin",
+    "MTL": "metal",
+    "OGN": "origin-protocol",
+    "ALICE": "my-neighbor-alice",
+    "DENT": "dent",
+    "CHR": "chromaway",
+    "STMX": "stormx",
+    "RAD": "radicle",
+    "SUPER": "superfarm",
+    "LOOM": "loom-network",
+    "ORN": "orion-protocol",
+    "WIF": "dogwifcoin",
+    "BONK": "bonk",
+    "JUP": "jupiter-exchange-solana",
+    "PYTH": "pyth-network",
+    "JTO": "jito-governance-token",
+    "TAO": "bittensor",
+    "KAS": "kaspa",
+    "TON": "the-open-network",
+    "NOT": "notcoin",
+    "FLOKI": "floki",
+    "WLD": "worldcoin-wld",
+    "STRK": "starknet",
+    "BLUR": "blur",
+    "BEAM": "beam-2",
+    "PENDLE": "pendle",
+    "ALT": "altlayer",
+    "PIXEL": "pixels",
+    "PORTAL": "portal-2",
+    "BOME": "book-of-meme",
 }
 
 
@@ -88,519 +225,539 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # =========================================================================
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch data from data sources (called by HA automatically)."""
+        """Fetch data from data sources."""
         try:
             data = await self.hass.async_add_executor_job(
                 self._fetch_all_symbols
             )
             return data
         except Exception as err:
-            raise UpdateFailed(
-                f"Error fetching stock data: {err}"
-            ) from err
+            raise UpdateFailed(f"Error fetching stock data: {err}") from err
 
     def _fetch_all_symbols(self) -> dict[str, Any]:
-        """Fetch data for all symbols (runs in executor thread)."""
+        """Fetch data for all symbols."""
         result = {}
 
         for symbol in self.symbols:
             try:
-                stock_data = self._fetch_symbol_data(symbol)
+                # Detect asset type and fetch accordingly
+                if self._is_crypto(symbol):
+                    stock_data = self._fetch_crypto(symbol)
+                else:
+                    stock_data = self._fetch_stock(symbol)
 
-                if stock_data:
-                    # Post-processing: ensure market_cap is calculated
-                    stock_data = self._ensure_market_cap(stock_data)
+                if stock_data and stock_data.get("price") is not None:
+                    # Add technical analysis
+                    stock_data = self._enrich_with_analysis(symbol, stock_data)
                     result[symbol] = stock_data
                     _LOGGER.debug(
-                        "Fetched data for %s: price=%s, market_cap=%s",
+                        "Fetched %s: price=%s, market_cap=%s, source=%s",
                         symbol,
                         stock_data.get("price"),
-                        stock_data.get("market_cap"),
+                        stock_data.get("market_cap_formatted", "N/A"),
+                        stock_data.get("data_source"),
                     )
                 else:
-                    _LOGGER.warning("No data returned for %s", symbol)
+                    _LOGGER.warning("No data for %s", symbol)
                     result[symbol] = self._empty_data(symbol)
 
             except Exception as err:
-                _LOGGER.error(
-                    "Error fetching %s: %s", symbol, err
-                )
+                _LOGGER.error("Error fetching %s: %s", symbol, err)
                 result[symbol] = self._empty_data(symbol)
 
         return result
 
     # =========================================================================
-    # ENSURE MARKET CAP (Post-Processing)
+    # ASSET TYPE DETECTION
     # =========================================================================
 
-    def _ensure_market_cap(self, data: dict[str, Any]) -> dict[str, Any]:
-        """
-        Ensure market_cap has a value.
+    def _is_crypto(self, symbol: str) -> bool:
+        """Detect if symbol is cryptocurrency."""
+        symbol = symbol.upper()
         
-        Fallback chain:
-        1. Already set from source -> use it
-        2. Calculate from circulating_supply * price
-        3. Calculate from shares_outstanding * price
-        4. Try fetching from Yahoo info API
-        """
-        mc = data.get("market_cap")
-        price = data.get("price")
+        # Pattern: XXX-USD, XXX-EUR, XXXUSD, etc.
+        crypto_patterns = [
+            r"^[A-Z0-9]{2,10}-USD$",
+            r"^[A-Z0-9]{2,10}-EUR$",
+            r"^[A-Z0-9]{2,10}-GBP$",
+            r"^[A-Z0-9]{2,10}-BTC$",
+            r"^[A-Z0-9]{2,10}-ETH$",
+            r"^[A-Z0-9]{2,10}USD$",
+            r"^[A-Z0-9]{2,10}EUR$",
+        ]
+        
+        for pattern in crypto_patterns:
+            if re.match(pattern, symbol):
+                return True
+        
+        # Check if base symbol is in crypto mapping
+        base = self._extract_crypto_base(symbol)
+        if base in CRYPTO_MAPPING:
+            return True
+        
+        return False
 
-        # Already have valid market cap
-        if mc is not None and mc != 0 and mc != "N/A":
-            try:
-                if float(mc) > 0:
-                    return data
-            except (ValueError, TypeError):
-                pass
+    def _extract_crypto_base(self, symbol: str) -> str:
+        """Extract base crypto symbol (e.g., BTC-USD -> BTC)."""
+        symbol = symbol.upper()
+        
+        # Remove common quote currencies
+        for suffix in ["-USD", "-EUR", "-GBP", "-BTC", "-ETH", "-USDT", "USD", "EUR", "USDT"]:
+            if symbol.endswith(suffix):
+                return symbol[:-len(suffix)]
+        
+        return symbol
 
-        if not price or price <= 0:
-            return data
-
-        # Fallback 1: circulating_supply * price (crypto)
-        circ_supply = data.get("circulating_supply")
-        if circ_supply and float(circ_supply) > 0:
-            calculated_mc = float(circ_supply) * float(price)
-            data["market_cap"] = calculated_mc
-            _LOGGER.debug(
-                "Market cap calculated from supply for %s: %s",
-                data.get("symbol"), calculated_mc
-            )
-            return data
-
-        # Fallback 2: shares_outstanding * price (stocks)
-        shares = data.get("shares_outstanding")
-        if shares and float(shares) > 0:
-            calculated_mc = float(shares) * float(price)
-            data["market_cap"] = calculated_mc
-            _LOGGER.debug(
-                "Market cap calculated from shares for %s: %s",
-                data.get("symbol"), calculated_mc
-            )
-            return data
-
-        # Fallback 3: Try fetching from Yahoo ticker.info directly
-        symbol = data.get("symbol")
-        if symbol and data.get("data_source") != SOURCE_YAHOO:
-            try:
-                ticker = yf.Ticker(symbol)
-                info = ticker.info or {}
-                
-                mc_from_info = info.get("marketCap")
-                if mc_from_info and mc_from_info > 0:
-                    data["market_cap"] = mc_from_info
-                    _LOGGER.debug(
-                        "Market cap fetched from Yahoo fallback for %s: %s",
-                        symbol, mc_from_info
-                    )
-                    
-                    # Also grab supply data if missing
-                    if not data.get("circulating_supply"):
-                        cs = info.get("circulatingSupply")
-                        if cs:
-                            data["circulating_supply"] = cs
-                    if not data.get("total_supply"):
-                        ts = info.get("totalSupply") 
-                        if ts:
-                            data["total_supply"] = ts
-                    if not data.get("max_supply"):
-                        ms = info.get("maxSupply")
-                        if ms:
-                            data["max_supply"] = ms
-                    if not data.get("shares_outstanding"):
-                        so = info.get("sharesOutstanding")
-                        if so:
-                            data["shares_outstanding"] = so
-                            
-            except Exception as err:
-                _LOGGER.debug(
-                    "Yahoo fallback for market_cap failed for %s: %s",
-                    symbol, err
-                )
-
-        return data
-
-    # =========================================================================
-    # MULTI-SOURCE FETCH WITH FALLBACK
-    # =========================================================================
-
-    def _fetch_symbol_data(self, symbol: str) -> dict[str, Any] | None:
-        """
-        Fetch data for a single symbol with multi-source fallback.
-
-        Priority:
-          1. Yahoo Finance (yfinance) - most reliable
-          2. Yahoo Finance Search API - backup
-          3. Google Finance - fallback
-        """
-        sources = self._get_source_order(symbol)
-
-        for source in sources:
-            try:
-                if source == SOURCE_YAHOO:
-                    data = self._fetch_yahoo(symbol)
-                elif source == SOURCE_GOOGLE:
-                    data = self._fetch_google(symbol)
-                elif source == SOURCE_INVESTING:
-                    data = self._fetch_investing(symbol)
-                else:
-                    continue
-
-                if data and data.get("price") is not None:
-                    data["data_source"] = source
-                    data["data_quality"] = "good"
-
-                    # Technische Analyse hinzufügen
-                    data = self._enrich_with_analysis(symbol, data)
-
-                    return data
-
-            except Exception as err:
-                _LOGGER.debug(
-                    "Source %s failed for %s: %s",
-                    source, symbol, err,
-                )
-                self._mark_source_failed(symbol, source)
-                continue
-
-        _LOGGER.warning(
-            "All sources failed for %s", symbol
-        )
+    def _get_coingecko_id(self, symbol: str) -> str | None:
+        """Get CoinGecko ID from symbol. Auto-searches if not in mapping."""
+        base = self._extract_crypto_base(symbol)
+        
+        # 1. Check local mapping first (fast)
+        if base in CRYPTO_MAPPING:
+            return CRYPTO_MAPPING[base]
+        
+        # 2. Search CoinGecko API (slower but finds everything)
+        coingecko_id = self._search_coingecko_id(base)
+        if coingecko_id:
+            # Cache for future use
+            CRYPTO_MAPPING[base] = coingecko_id
+            _LOGGER.info("Auto-discovered CoinGecko ID for %s: %s", base, coingecko_id)
+            return coingecko_id
+        
         return None
 
-    def _get_source_order(self, symbol: str) -> list[str]:
-        """Get ordered list of sources to try."""
-        if self.preferred_source != SOURCE_AUTO:
-            sources = [self.preferred_source]
-            for s in [SOURCE_YAHOO, SOURCE_GOOGLE, SOURCE_INVESTING]:
-                if s not in sources:
-                    sources.append(s)
-            return sources
-
-        # Auto-Modus: Yahoo zuerst
-        failed = self._failed_sources.get(symbol, [])
-
-        sources = [SOURCE_YAHOO, SOURCE_GOOGLE, SOURCE_INVESTING]
-
-        # Fehlgeschlagene Quellen ans Ende
-        for failed_source in failed:
-            if failed_source in sources:
-                sources.remove(failed_source)
-                sources.append(failed_source)
-
-        return sources
-
-    def _mark_source_failed(self, symbol: str, source: str) -> None:
-        """Mark a source as failed for a symbol."""
-        if symbol not in self._failed_sources:
-            self._failed_sources[symbol] = []
-        if source not in self._failed_sources[symbol]:
-            self._failed_sources[symbol].append(source)
-
-        # Reset nach 3 Fehlversuchen
-        if len(self._failed_sources[symbol]) >= 3:
-            self._failed_sources[symbol] = []
+    def _search_coingecko_id(self, symbol: str) -> str | None:
+        """Search CoinGecko for a coin by symbol."""
+        try:
+            url = "https://api.coingecko.com/api/v3/search"
+            params = {"query": symbol}
+            
+            response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+            
+            if response.status_code == 429:
+                _LOGGER.warning("CoinGecko rate limit hit")
+                return None
+                
+            if response.status_code != 200:
+                return None
+            
+            data = response.json()
+            coins = data.get("coins", [])
+            
+            if not coins:
+                return None
+            
+            # Find exact symbol match first
+            symbol_upper = symbol.upper()
+            for coin in coins:
+                if coin.get("symbol", "").upper() == symbol_upper:
+                    return coin.get("id")
+            
+            # If no exact match, return first result
+            return coins[0].get("id")
+            
+        except Exception as err:
+            _LOGGER.debug("CoinGecko search error for %s: %s", symbol, err)
+            return None
 
     # =========================================================================
-    # SOURCE 1: YAHOO FINANCE (yfinance library)
+    # CRYPTO FETCHING (CoinGecko + CoinPaprika)
     # =========================================================================
+
+    def _fetch_crypto(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch crypto data from CoinGecko, fallback to CoinPaprika, then yfinance."""
+        
+        # Try CoinGecko first (best data)
+        data = self._fetch_coingecko(symbol)
+        if data and data.get("price"):
+            data["data_source"] = "coingecko"
+            return data
+        
+        # Fallback to CoinPaprika
+        data = self._fetch_coinpaprika(symbol)
+        if data and data.get("price"):
+            data["data_source"] = "coinpaprika"
+            return data
+        
+        # Last fallback: yfinance
+        data = self._fetch_yahoo(symbol)
+        if data and data.get("price"):
+            return data
+        
+        return None
+
+    def _fetch_coingecko(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch crypto data from CoinGecko API."""
+        coingecko_id = self._get_coingecko_id(symbol)
+        
+        if not coingecko_id:
+            _LOGGER.debug("No CoinGecko ID found for %s", symbol)
+            return None
+        
+        try:
+            # Get detailed coin data
+            url = f"https://api.coingecko.com/api/v3/coins/{coingecko_id}"
+            params = {
+                "localization": "false",
+                "tickers": "false",
+                "community_data": "false",
+                "developer_data": "false",
+                "sparkline": "true",  # Get 7-day sparkline for mini charts
+            }
+            
+            response = requests.get(url, params=params, headers=HEADERS, timeout=15)
+            
+            if response.status_code == 429:
+                _LOGGER.warning("CoinGecko rate limit hit for %s", symbol)
+                return None
+            
+            if response.status_code != 200:
+                _LOGGER.debug("CoinGecko error for %s: HTTP %s", symbol, response.status_code)
+                return None
+            
+            coin = response.json()
+            market_data = coin.get("market_data", {})
+            
+            # Determine quote currency from symbol
+            quote_currency = "usd"
+            if "-EUR" in symbol.upper() or symbol.upper().endswith("EUR"):
+                quote_currency = "eur"
+            elif "-GBP" in symbol.upper():
+                quote_currency = "gbp"
+            elif "-CHF" in symbol.upper():
+                quote_currency = "chf"
+            
+            price = market_data.get("current_price", {}).get(quote_currency)
+            if not price:
+                return None
+            
+            # Get all the data
+            change_24h = market_data.get("price_change_percentage_24h")
+            change_abs = market_data.get("price_change_24h")
+            
+            # Market cap
+            market_cap = market_data.get("market_cap", {}).get(quote_currency)
+            
+            # Supply data
+            circulating_supply = market_data.get("circulating_supply")
+            total_supply = market_data.get("total_supply")
+            max_supply = market_data.get("max_supply")
+            
+            # Sparkline for history
+            sparkline = coin.get("market_data", {}).get("sparkline_7d", {}).get("price", [])
+            
+            data = {
+                "symbol": symbol,
+                "company_name": coin.get("name", symbol),
+                "long_name": coin.get("name", ""),
+                "exchange": "Crypto",
+                "currency": quote_currency.upper(),
+                "sector": "Cryptocurrency",
+                "industry": coin.get("categories", ["Cryptocurrency"])[0] if coin.get("categories") else "Cryptocurrency",
+                "country": "",
+                "website": coin.get("links", {}).get("homepage", [""])[0] if coin.get("links", {}).get("homepage") else "",
+                "quote_type": "CRYPTOCURRENCY",
+                
+                # Price data
+                "price": price,
+                "change": change_abs,
+                "change_percent": change_24h,
+                "previous_close": price - change_abs if change_abs else None,
+                "today_open": None,
+                "today_high": market_data.get("high_24h", {}).get(quote_currency),
+                "today_low": market_data.get("low_24h", {}).get(quote_currency),
+                
+                # Volume
+                "volume": market_data.get("total_volume", {}).get(quote_currency),
+                "avg_volume": None,
+                
+                # Market cap & Supply
+                "market_cap": market_cap,
+                "market_cap_formatted": self._format_market_cap(market_cap) if market_cap else "N/A",
+                "circulating_supply": circulating_supply,
+                "total_supply": total_supply,
+                "max_supply": max_supply,
+                "shares_outstanding": None,
+                
+                # Fully diluted valuation
+                "fully_diluted_valuation": market_data.get("fully_diluted_valuation", {}).get(quote_currency),
+                
+                # Ranges
+                "52_week_high": market_data.get("ath", {}).get(quote_currency),
+                "52_week_low": market_data.get("atl", {}).get(quote_currency),
+                "50_day_avg": None,
+                "200_day_avg": None,
+                
+                # ATH/ATL data
+                "ath": market_data.get("ath", {}).get(quote_currency),
+                "ath_date": market_data.get("ath_date", {}).get(quote_currency),
+                "ath_change_percent": market_data.get("ath_change_percentage", {}).get(quote_currency),
+                "atl": market_data.get("atl", {}).get(quote_currency),
+                "atl_date": market_data.get("atl_date", {}).get(quote_currency),
+                
+                # Performance
+                "week_change_percent": market_data.get("price_change_percentage_7d"),
+                "month_change_percent": market_data.get("price_change_percentage_30d"),
+                "ytd_change_percent": market_data.get("price_change_percentage_1y"),
+                
+                # Rank
+                "market_cap_rank": coin.get("market_cap_rank"),
+                "coingecko_rank": coin.get("coingecko_rank"),
+                "coingecko_id": coingecko_id,
+                
+                # Meta
+                "data_source": "coingecko",
+                "data_quality": "good",
+                
+                # History from sparkline
+                "history_dates": [],
+                "history_closes": sparkline[-60:] if sparkline else [],  # Last 60 data points
+                "history_volumes": [],
+                "history_highs": [],
+                "history_lows": [],
+            }
+            
+            _LOGGER.debug(
+                "CoinGecko data for %s: price=%s, market_cap=%s, supply=%s",
+                symbol, price, data.get("market_cap_formatted"), circulating_supply
+            )
+            
+            return data
+            
+        except Exception as err:
+            _LOGGER.debug("CoinGecko fetch error for %s: %s", symbol, err)
+            return None
+
+    def _fetch_coinpaprika(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch crypto data from CoinPaprika API (fallback)."""
+        base = self._extract_crypto_base(symbol)
+        
+        try:
+            # First, search for the coin
+            search_url = f"https://api.coinpaprika.com/v1/search?q={base}&limit=5"
+            search_resp = requests.get(search_url, headers=HEADERS, timeout=10)
+            
+            if search_resp.status_code != 200:
+                return None
+            
+            search_data = search_resp.json()
+            currencies = search_data.get("currencies", [])
+            
+            if not currencies:
+                return None
+            
+            # Find best match
+            coin_id = None
+            for currency in currencies:
+                if currency.get("symbol", "").upper() == base.upper():
+                    coin_id = currency.get("id")
+                    break
+            
+            if not coin_id:
+                coin_id = currencies[0].get("id")
+            
+            if not coin_id:
+                return None
+            
+            # Get ticker data
+            ticker_url = f"https://api.coinpaprika.com/v1/tickers/{coin_id}"
+            ticker_resp = requests.get(ticker_url, headers=HEADERS, timeout=10)
+            
+            if ticker_resp.status_code != 200:
+                return None
+            
+            ticker = ticker_resp.json()
+            quotes = ticker.get("quotes", {}).get("USD", {})
+            
+            price = quotes.get("price")
+            if not price:
+                return None
+            
+            market_cap = quotes.get("market_cap")
+            
+            data = {
+                "symbol": symbol,
+                "company_name": ticker.get("name", symbol),
+                "long_name": ticker.get("name", ""),
+                "exchange": "Crypto",
+                "currency": "USD",
+                "sector": "Cryptocurrency",
+                "industry": "Cryptocurrency",
+                "country": "",
+                "website": "",
+                "quote_type": "CRYPTOCURRENCY",
+                
+                "price": price,
+                "change": None,
+                "change_percent": quotes.get("percent_change_24h"),
+                "previous_close": None,
+                "today_open": None,
+                "today_high": None,
+                "today_low": None,
+                
+                "volume": quotes.get("volume_24h"),
+                "avg_volume": None,
+                
+                "market_cap": market_cap,
+                "market_cap_formatted": self._format_market_cap(market_cap) if market_cap else "N/A",
+                "circulating_supply": ticker.get("circulating_supply"),
+                "total_supply": ticker.get("total_supply"),
+                "max_supply": ticker.get("max_supply"),
+                "shares_outstanding": None,
+                
+                "52_week_high": quotes.get("ath_price"),
+                "52_week_low": None,
+                "50_day_avg": None,
+                "200_day_avg": None,
+                
+                "ath": quotes.get("ath_price"),
+                "ath_date": quotes.get("ath_date"),
+                "ath_change_percent": quotes.get("percent_from_price_ath"),
+                
+                "week_change_percent": quotes.get("percent_change_7d"),
+                "month_change_percent": quotes.get("percent_change_30d"),
+                "ytd_change_percent": quotes.get("percent_change_1y"),
+                
+                "market_cap_rank": ticker.get("rank"),
+                
+                "data_source": "coinpaprika",
+                "data_quality": "good",
+                
+                "history_dates": [],
+                "history_closes": [],
+                "history_volumes": [],
+                "history_highs": [],
+                "history_lows": [],
+            }
+            
+            return data
+            
+        except Exception as err:
+            _LOGGER.debug("CoinPaprika fetch error for %s: %s", symbol, err)
+            return None
+
+    # =========================================================================
+    # STOCK FETCHING (yfinance + Yahoo v8)
+    # =========================================================================
+
+    def _fetch_stock(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch stock data from Yahoo Finance."""
+        
+        # Try yfinance first (most complete)
+        data = self._fetch_yahoo(symbol)
+        if data and data.get("price"):
+            return data
+        
+        # Fallback to Yahoo v8 Chart API
+        data = self._fetch_yahoo_v8(symbol)
+        if data and data.get("price"):
+            return data
+        
+        return None
 
     def _fetch_yahoo(self, symbol: str) -> dict[str, Any] | None:
         """Fetch stock data from Yahoo Finance using yfinance."""
-        ticker = yf.Ticker(symbol)
-
-        # Basis-Info abrufen
-        info = ticker.info
-        if not info:
-            return None
-
-        price = info.get("regularMarketPrice") or info.get("currentPrice")
-        prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
-
-        if price is None and prev_close is None:
-            return None
-
-        if price is None:
-            price = prev_close
-
-        # Änderung berechnen
-        change = None
-        change_percent = None
-        if price and prev_close:
-            change = round(price - prev_close, 4)
-            change_percent = round((change / prev_close) * 100, 4)
-
-        # Historische Daten für technische Analyse
-        history = self._get_history_safe(ticker, period="3mo")
-
-        # Market Cap - multiple Fallbacks
-        market_cap = (
-            info.get("marketCap")
-            or info.get("market_cap")
-            or info.get("MarketCap")
-            or None
-        )
-
-        # Circulating Supply (Krypto)
-        circulating_supply = (
-            info.get("circulatingSupply")
-            or info.get("circulating_supply")
-            or None
-        )
-        total_supply = (
-            info.get("totalSupply")
-            or info.get("total_supply")
-            or None
-        )
-        max_supply = (
-            info.get("maxSupply")
-            or info.get("max_supply")
-            or None
-        )
-
-        # Shares Outstanding (Aktien)
-        shares_outstanding = (
-            info.get("sharesOutstanding")
-            or info.get("shares_outstanding")
-            or None
-        )
-
-        # Wenn market_cap fehlt aber supply/shares vorhanden -> berechnen
-        if (not market_cap or market_cap == 0) and price:
-            if circulating_supply and circulating_supply > 0:
-                market_cap = circulating_supply * price
-            elif shares_outstanding and shares_outstanding > 0:
-                market_cap = shares_outstanding * price
-
-        data = {
-            # === Identifikation ===
-            "symbol": symbol,
-            "company_name": info.get("shortName") or info.get("longName", symbol),
-            "long_name": info.get("longName", ""),
-            "exchange": info.get("exchange", "N/A"),
-            "currency": info.get("currency", "USD"),
-            "sector": info.get("sector", ""),
-            "industry": info.get("industry", ""),
-            "country": info.get("country", ""),
-            "website": info.get("website", ""),
-
-            # === Preisdaten ===
-            "price": price,
-            "change": change,
-            "change_percent": change_percent,
-            "previous_close": prev_close,
-            "today_open": info.get("regularMarketOpen") or info.get("open"),
-            "today_high": info.get("regularMarketDayHigh") or info.get("dayHigh"),
-            "today_low": info.get("regularMarketDayLow") or info.get("dayLow"),
-
-            # === Volumen ===
-            "volume": info.get("regularMarketVolume") or info.get("volume"),
-            "avg_volume": info.get("averageVolume"),
-            "avg_volume_10d": info.get("averageDailyVolume10Day"),
-
-            # === Marktdaten ===
-            "market_cap": market_cap,
-            "enterprise_value": info.get("enterpriseValue"),
-            "shares_outstanding": shares_outstanding,
-            "float_shares": info.get("floatShares"),
-
-            # === Supply (Krypto) ===
-            "circulating_supply": circulating_supply,
-            "total_supply": total_supply,
-            "max_supply": max_supply,
-
-            # === Fundamentaldaten ===
-            "pe_ratio": info.get("trailingPE"),
-            "forward_pe": info.get("forwardPE"),
-            "peg_ratio": info.get("pegRatio"),
-            "eps": info.get("trailingEps"),
-            "forward_eps": info.get("forwardEps"),
-            "dividend_yield": self._safe_percent(info.get("dividendYield")),
-            "dividend_rate": info.get("dividendRate"),
-            "payout_ratio": self._safe_percent(info.get("payoutRatio")),
-            "book_value": info.get("bookValue"),
-            "price_to_book": info.get("priceToBook"),
-            "revenue": info.get("totalRevenue"),
-            "profit_margin": self._safe_percent(info.get("profitMargins")),
-            "operating_margin": self._safe_percent(info.get("operatingMargins")),
-            "return_on_equity": self._safe_percent(info.get("returnOnEquity")),
-
-            # === Bereiche ===
-            "52_week_high": info.get("fiftyTwoWeekHigh"),
-            "52_week_low": info.get("fiftyTwoWeekLow"),
-            "50_day_avg": info.get("fiftyDayAverage"),
-            "200_day_avg": info.get("twoHundredDayAverage"),
-
-            # === Meta ===
-            "beta": info.get("beta"),
-            "target_price": info.get("targetMeanPrice"),
-            "recommendation": info.get("recommendationKey", ""),
-            "number_of_analysts": info.get("numberOfAnalystOpinions"),
-            "next_earnings_date": str(info.get("earningsTimestamp", "")),
-            "quote_type": info.get("quoteType", "EQUITY"),
-
-            # === Historische Daten ===
-            "history_dates": [],
-            "history_closes": [],
-            "history_volumes": [],
-            "history_highs": [],
-            "history_lows": [],
-        }
-
-        # Historische Daten einbinden
-        if history is not None and not history.empty:
-            data["history_dates"] = (
-                history.index.strftime("%Y-%m-%d").tolist()
-            )
-            data["history_closes"] = [
-                round(v, 4) for v in history["Close"].tolist()
-            ]
-            data["history_volumes"] = history["Volume"].tolist()
-            data["history_highs"] = [
-                round(v, 4) for v in history["High"].tolist()
-            ]
-            data["history_lows"] = [
-                round(v, 4) for v in history["Low"].tolist()
-            ]
-
-        # Zeitraum-Performance
-        if history is not None and not history.empty:
-            data.update(self._calculate_period_changes(history, price))
-
-        return data
-
-    # =========================================================================
-    # SOURCE 2: GOOGLE FINANCE (Web Scraping Fallback)
-    # =========================================================================
-
-    def _fetch_google(self, symbol: str) -> dict[str, Any] | None:
-        """Fetch basic stock data from Google Finance (fallback)."""
         try:
-            from bs4 import BeautifulSoup
-
-            url = f"https://www.google.com/finance/quote/{symbol}"
-
-            if "." not in symbol and ":" not in symbol:
-                for exchange in ["NASDAQ", "NYSE"]:
-                    test_url = (
-                        f"https://www.google.com/finance/quote/"
-                        f"{symbol}:{exchange}"
-                    )
-                    try:
-                        response = requests.get(
-                            test_url, headers=HEADERS, timeout=10
-                        )
-                        if response.status_code == 200 and "data-last-price" in response.text:
-                            url = test_url
-                            break
-                    except Exception:
-                        continue
-
-            response = requests.get(url, headers=HEADERS, timeout=10)
-
-            if response.status_code != 200:
+            ticker = yf.Ticker(symbol)
+            info = ticker.info
+            
+            if not info:
                 return None
 
-            soup = BeautifulSoup(response.text, "html.parser")
+            price = info.get("regularMarketPrice") or info.get("currentPrice")
+            prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
 
-            price_element = soup.find("div", {"data-last-price": True})
-            if not price_element:
+            if price is None and prev_close is None:
                 return None
 
-            price = float(price_element["data-last-price"])
+            if price is None:
+                price = prev_close
 
+            # Calculate change
             change = None
             change_percent = None
-            change_element = soup.find("div", {"data-last-normal-market-change": True})
-            if change_element:
-                try:
-                    change = float(change_element.get("data-last-normal-market-change", 0))
-                    change_pct_str = change_element.get(
-                        "data-last-normal-market-change-percent", "0"
-                    )
-                    change_percent = float(change_pct_str.strip("%"))
-                except (ValueError, TypeError):
-                    pass
+            if price and prev_close:
+                change = round(price - prev_close, 4)
+                change_percent = round((change / prev_close) * 100, 4)
 
-            name_element = soup.find("div", class_="zzDege")
-            company_name = name_element.text if name_element else symbol
+            # Get history for technical analysis
+            history = self._get_history_safe(ticker, period="3mo")
 
-            currency_element = soup.find("div", {"data-currency-code": True})
-            currency = (
-                currency_element["data-currency-code"]
-                if currency_element
-                else "USD"
-            )
+            # Market cap
+            market_cap = info.get("marketCap")
+            circulating_supply = info.get("circulatingSupply")
+            total_supply = info.get("totalSupply")
+            max_supply = info.get("maxSupply")
+            shares_outstanding = info.get("sharesOutstanding")
 
-            prev_close = price - change if change else None
+            # Calculate market cap if missing
+            if not market_cap and price:
+                if circulating_supply and circulating_supply > 0:
+                    market_cap = circulating_supply * price
+                elif shares_outstanding and shares_outstanding > 0:
+                    market_cap = shares_outstanding * price
 
-            # Market cap: try to extract from Google page
-            market_cap = None
-            try:
-                # Google Finance shows market cap in the details section
-                detail_divs = soup.find_all("div", class_="P6K39c")
-                for div in detail_divs:
-                    label = div.find("div", class_="mfs7Fc")
-                    value = div.find("div", class_="YMlKec")
-                    if label and value:
-                        label_text = label.text.strip().lower()
-                        if "market cap" in label_text or "marktkapitalisierung" in label_text:
-                            market_cap = self._parse_google_market_cap(value.text.strip())
-                            break
-            except Exception:
-                pass
-
-            return {
+            data = {
                 "symbol": symbol,
-                "company_name": company_name,
-                "long_name": company_name,
-                "exchange": "Google Finance",
-                "currency": currency,
-                "sector": "",
-                "industry": "",
-                "country": "",
-                "website": "",
+                "company_name": info.get("shortName") or info.get("longName", symbol),
+                "long_name": info.get("longName", ""),
+                "exchange": info.get("exchange", "N/A"),
+                "currency": info.get("currency", "USD"),
+                "sector": info.get("sector", ""),
+                "industry": info.get("industry", ""),
+                "country": info.get("country", ""),
+                "website": info.get("website", ""),
+                "quote_type": info.get("quoteType", "EQUITY"),
+
                 "price": price,
                 "change": change,
                 "change_percent": change_percent,
                 "previous_close": prev_close,
-                "today_open": None,
-                "today_high": None,
-                "today_low": None,
-                "volume": None,
-                "avg_volume": None,
-                "avg_volume_10d": None,
+                "today_open": info.get("regularMarketOpen") or info.get("open"),
+                "today_high": info.get("regularMarketDayHigh") or info.get("dayHigh"),
+                "today_low": info.get("regularMarketDayLow") or info.get("dayLow"),
+
+                "volume": info.get("regularMarketVolume") or info.get("volume"),
+                "avg_volume": info.get("averageVolume"),
+                "avg_volume_10d": info.get("averageDailyVolume10Day"),
+
                 "market_cap": market_cap,
-                "enterprise_value": None,
-                "shares_outstanding": None,
-                "float_shares": None,
-                "circulating_supply": None,
-                "total_supply": None,
-                "max_supply": None,
-                "pe_ratio": None,
-                "forward_pe": None,
-                "peg_ratio": None,
-                "eps": None,
-                "forward_eps": None,
-                "dividend_yield": None,
-                "dividend_rate": None,
-                "payout_ratio": None,
-                "book_value": None,
-                "price_to_book": None,
-                "revenue": None,
-                "profit_margin": None,
-                "operating_margin": None,
-                "return_on_equity": None,
-                "52_week_high": None,
-                "52_week_low": None,
-                "50_day_avg": None,
-                "200_day_avg": None,
-                "beta": None,
-                "target_price": None,
-                "recommendation": "",
-                "number_of_analysts": None,
-                "next_earnings_date": "",
-                "quote_type": "EQUITY",
+                "market_cap_formatted": self._format_market_cap(market_cap) if market_cap else "N/A",
+                "enterprise_value": info.get("enterpriseValue"),
+                "shares_outstanding": shares_outstanding,
+                "float_shares": info.get("floatShares"),
+                "circulating_supply": circulating_supply,
+                "total_supply": total_supply,
+                "max_supply": max_supply,
+
+                "pe_ratio": info.get("trailingPE"),
+                "forward_pe": info.get("forwardPE"),
+                "peg_ratio": info.get("pegRatio"),
+                "eps": info.get("trailingEps"),
+                "forward_eps": info.get("forwardEps"),
+                "dividend_yield": self._safe_percent(info.get("dividendYield")),
+                "dividend_rate": info.get("dividendRate"),
+                "payout_ratio": self._safe_percent(info.get("payoutRatio")),
+                "book_value": info.get("bookValue"),
+                "price_to_book": info.get("priceToBook"),
+                "revenue": info.get("totalRevenue"),
+                "profit_margin": self._safe_percent(info.get("profitMargins")),
+                "operating_margin": self._safe_percent(info.get("operatingMargins")),
+                "return_on_equity": self._safe_percent(info.get("returnOnEquity")),
+
+                "52_week_high": info.get("fiftyTwoWeekHigh"),
+                "52_week_low": info.get("fiftyTwoWeekLow"),
+                "50_day_avg": info.get("fiftyDayAverage"),
+                "200_day_avg": info.get("twoHundredDayAverage"),
+
+                "beta": info.get("beta"),
+                "target_price": info.get("targetMeanPrice"),
+                "recommendation": info.get("recommendationKey", ""),
+                "number_of_analysts": info.get("numberOfAnalystOpinions"),
+
+                "data_source": "yahoo",
+                "data_quality": "good",
+
                 "history_dates": [],
                 "history_closes": [],
                 "history_volumes": [],
@@ -608,58 +765,29 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "history_lows": [],
             }
 
-        except ImportError:
-            _LOGGER.error("beautifulsoup4 not installed")
-            return None
+            # Add history data
+            if history is not None and not history.empty:
+                data["history_dates"] = history.index.strftime("%Y-%m-%d").tolist()
+                data["history_closes"] = [round(v, 4) for v in history["Close"].tolist()]
+                data["history_volumes"] = history["Volume"].tolist()
+                data["history_highs"] = [round(v, 4) for v in history["High"].tolist()]
+                data["history_lows"] = [round(v, 4) for v in history["Low"].tolist()]
+                data.update(self._calculate_period_changes(history, price))
+
+            return data
+
         except Exception as err:
-            _LOGGER.debug("Google Finance fetch error: %s", err)
+            _LOGGER.debug("yfinance error for %s: %s", symbol, err)
             return None
 
-    @staticmethod
-    def _parse_google_market_cap(text: str) -> float | None:
-        """Parse Google Finance market cap text like '2.89T USD' or '156.3B'."""
-        if not text:
-            return None
+    def _fetch_yahoo_v8(self, symbol: str) -> dict[str, Any] | None:
+        """Fetch data from Yahoo v8 Chart API (fallback)."""
         try:
-            text = text.replace(",", "").replace("$", "").replace("€", "").strip()
-            # Remove currency codes
-            for cur in ["USD", "EUR", "GBP", "JPY", "CHF"]:
-                text = text.replace(cur, "").strip()
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+            params = {"range": "3mo", "interval": "1d"}
             
-            multipliers = {
-                "T": 1_000_000_000_000,
-                "B": 1_000_000_000,
-                "Mrd": 1_000_000_000,
-                "Bio": 1_000_000_000_000,
-                "M": 1_000_000,
-                "Mio": 1_000_000,
-                "K": 1_000,
-            }
+            response = requests.get(url, params=params, headers=HEADERS, timeout=15)
             
-            for suffix, mult in multipliers.items():
-                if text.upper().endswith(suffix.upper()):
-                    num_part = text[:len(text) - len(suffix)].strip()
-                    return float(num_part) * mult
-            
-            return float(text)
-        except (ValueError, TypeError):
-            return None
-
-    # =========================================================================
-    # SOURCE 3: INVESTING.COM (Yahoo v8 API Fallback)
-    # =========================================================================
-
-    def _fetch_investing(self, symbol: str) -> dict[str, Any] | None:
-        """Fetch data from Yahoo Finance v8 chart API + supplementary info."""
-        try:
-            # Step 1: Chart API for price data + history
-            url = (
-                f"https://query1.finance.yahoo.com/v8/finance/chart/"
-                f"{symbol}?range=3mo&interval=1d"
-            )
-
-            response = requests.get(url, headers=HEADERS, timeout=10)
-
             if response.status_code != 200:
                 return None
 
@@ -681,13 +809,9 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             prev_close = meta.get("chartPreviousClose") or meta.get("previousClose")
             change = round(price - prev_close, 4) if prev_close else None
-            change_pct = (
-                round((change / prev_close) * 100, 4)
-                if change and prev_close
-                else None
-            )
+            change_pct = round((change / prev_close) * 100, 4) if change and prev_close else None
 
-            # Historische Daten
+            # History data
             quotes = indicators.get("quote", [{}])[0]
             closes = quotes.get("close", [])
             volumes = quotes.get("volume", [])
@@ -695,60 +819,19 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             lows = quotes.get("low", [])
 
             from datetime import datetime
-            dates = [
-                datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
-                for ts in timestamps
-            ] if timestamps else []
+            dates = [datetime.fromtimestamp(ts).strftime("%Y-%m-%d") for ts in timestamps] if timestamps else []
 
-            clean_closes = [
-                round(c, 4) if c is not None else 0
-                for c in closes
-            ]
-            clean_volumes = [v if v is not None else 0 for v in volumes]
-            clean_highs = [
-                round(h, 4) if h is not None else 0
-                for h in highs
-            ]
-            clean_lows = [
-                round(lo, 4) if lo is not None else 0
-                for lo in lows
-            ]
-
-            # Step 2: Try to get supplementary data (market cap, supply, etc.)
-            # via Yahoo v10 or v7 quoteSummary API
-            supplementary = self._fetch_supplementary_data(symbol)
-
-            market_cap = supplementary.get("market_cap")
-            circulating_supply = supplementary.get("circulating_supply")
-            total_supply = supplementary.get("total_supply")
-            max_supply = supplementary.get("max_supply")
-            shares_outstanding = supplementary.get("shares_outstanding")
-            pe_ratio = supplementary.get("pe_ratio")
-            eps = supplementary.get("eps")
-            dividend_yield = supplementary.get("dividend_yield")
-            avg_volume = supplementary.get("avg_volume")
-            week52_high = supplementary.get("52_week_high") or meta.get("fiftyTwoWeekHigh")
-            week52_low = supplementary.get("52_week_low") or meta.get("fiftyTwoWeekLow")
-            day50_avg = supplementary.get("50_day_avg")
-            day200_avg = supplementary.get("200_day_avg")
-
-            # Calculate market cap if still missing
-            if (not market_cap or market_cap == 0) and price:
-                if circulating_supply and circulating_supply > 0:
-                    market_cap = circulating_supply * price
-                elif shares_outstanding and shares_outstanding > 0:
-                    market_cap = shares_outstanding * price
-
-            return {
+            data = {
                 "symbol": symbol,
                 "company_name": meta.get("shortName", symbol),
                 "long_name": meta.get("longName", ""),
                 "exchange": meta.get("exchangeName", "N/A"),
                 "currency": meta.get("currency", "USD"),
-                "sector": supplementary.get("sector", ""),
-                "industry": supplementary.get("industry", ""),
+                "sector": "",
+                "industry": "",
                 "country": "",
-                "website": "",
+                "quote_type": meta.get("instrumentType", "EQUITY"),
+
                 "price": price,
                 "change": change,
                 "change_percent": change_pct,
@@ -756,121 +839,43 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "today_open": meta.get("regularMarketOpen"),
                 "today_high": meta.get("regularMarketDayHigh"),
                 "today_low": meta.get("regularMarketDayLow"),
+
                 "volume": meta.get("regularMarketVolume"),
-                "avg_volume": avg_volume,
-                "avg_volume_10d": None,
-                "market_cap": market_cap,
-                "enterprise_value": None,
-                "shares_outstanding": shares_outstanding,
-                "float_shares": None,
-                "circulating_supply": circulating_supply,
-                "total_supply": total_supply,
-                "max_supply": max_supply,
-                "pe_ratio": pe_ratio,
-                "forward_pe": None,
-                "peg_ratio": None,
-                "eps": eps,
-                "forward_eps": None,
-                "dividend_yield": dividend_yield,
-                "dividend_rate": None,
-                "payout_ratio": None,
-                "book_value": None,
-                "price_to_book": None,
-                "revenue": None,
-                "profit_margin": None,
-                "operating_margin": None,
-                "return_on_equity": None,
-                "52_week_high": week52_high,
-                "52_week_low": week52_low,
-                "50_day_avg": day50_avg,
-                "200_day_avg": day200_avg,
-                "beta": None,
-                "target_price": None,
-                "recommendation": "",
-                "number_of_analysts": None,
-                "next_earnings_date": "",
-                "quote_type": meta.get("instrumentType", "EQUITY"),
+                "avg_volume": None,
+
+                "market_cap": None,
+                "market_cap_formatted": "N/A",
+                "shares_outstanding": None,
+                "circulating_supply": None,
+                "total_supply": None,
+                "max_supply": None,
+
+                "52_week_high": meta.get("fiftyTwoWeekHigh"),
+                "52_week_low": meta.get("fiftyTwoWeekLow"),
+                "50_day_avg": None,
+                "200_day_avg": None,
+
+                "data_source": "yahoo_v8",
+                "data_quality": "good",
+
                 "history_dates": dates,
-                "history_closes": clean_closes,
-                "history_volumes": clean_volumes,
-                "history_highs": clean_highs,
-                "history_lows": clean_lows,
+                "history_closes": [round(c, 4) if c else 0 for c in closes],
+                "history_volumes": [v if v else 0 for v in volumes],
+                "history_highs": [round(h, 4) if h else 0 for h in highs],
+                "history_lows": [round(lo, 4) if lo else 0 for lo in lows],
             }
 
+            return data
+
         except Exception as err:
-            _LOGGER.debug("Investing fallback fetch error: %s", err)
+            _LOGGER.debug("Yahoo v8 error for %s: %s", symbol, err)
             return None
 
-    def _fetch_supplementary_data(self, symbol: str) -> dict[str, Any]:
-        """
-        Fetch supplementary data like market cap, supply, PE ratio.
-        Uses Yahoo v7 quote API which returns more data than v8 chart API.
-        """
-        result = {}
-        
-        try:
-            # Yahoo v7 quote API - returns market cap, supply data, fundamentals
-            url = (
-                f"https://query1.finance.yahoo.com/v7/finance/quote"
-                f"?symbols={symbol}&fields=marketCap,sharesOutstanding,"
-                f"circulatingSupply,totalSupply,maxSupply,"
-                f"trailingPE,epsTrailingTwelveMonths,dividendYield,"
-                f"averageVolume,fiftyTwoWeekHigh,fiftyTwoWeekLow,"
-                f"fiftyDayAverage,twoHundredDayAverage,"
-                f"sector,industry"
-            )
-            
-            response = requests.get(url, headers=HEADERS, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                quote_response = data.get("quoteResponse", {})
-                quotes = quote_response.get("result", [])
-                
-                if quotes:
-                    q = quotes[0]
-                    
-                    result["market_cap"] = q.get("marketCap")
-                    result["shares_outstanding"] = q.get("sharesOutstanding")
-                    result["circulating_supply"] = q.get("circulatingSupply")
-                    result["total_supply"] = q.get("totalSupply")
-                    result["max_supply"] = q.get("maxSupply")
-                    result["pe_ratio"] = q.get("trailingPE")
-                    result["eps"] = q.get("epsTrailingTwelveMonths")
-                    result["avg_volume"] = q.get("averageVolume") or q.get("averageDailyVolume3Month")
-                    result["52_week_high"] = q.get("fiftyTwoWeekHigh")
-                    result["52_week_low"] = q.get("fiftyTwoWeekLow")
-                    result["50_day_avg"] = q.get("fiftyDayAverage")
-                    result["200_day_avg"] = q.get("twoHundredDayAverage")
-                    result["sector"] = q.get("sector", "")
-                    result["industry"] = q.get("industry", "")
-                    
-                    div_yield = q.get("dividendYield")
-                    if div_yield:
-                        result["dividend_yield"] = round(div_yield * 100, 2)
-
-                    _LOGGER.debug(
-                        "Supplementary data fetched for %s: mc=%s, supply=%s",
-                        symbol,
-                        result.get("market_cap"),
-                        result.get("circulating_supply"),
-                    )
-                    
-        except Exception as err:
-            _LOGGER.debug(
-                "Supplementary data fetch failed for %s: %s",
-                symbol, err
-            )
-        
-        return result
-
     # =========================================================================
-    # TECHNICAL ANALYSIS ENRICHMENT
+    # TECHNICAL ANALYSIS
     # =========================================================================
 
-    def _enrich_with_analysis(
-        self, symbol: str, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    def _enrich_with_analysis(self, symbol: str, data: dict[str, Any]) -> dict[str, Any]:
         """Add technical analysis to stock data."""
         closes = data.get("history_closes", [])
         highs = data.get("history_highs", [])
@@ -878,95 +883,55 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         volumes = data.get("history_volumes", [])
 
         if not closes or len(closes) < 5:
-            data["trend"] = {
-                "direction": "unknown",
-                "strength": 0,
-                "confidence": 0,
-            }
+            data["trend"] = {"direction": "unknown", "strength": 0, "confidence": 0}
             data["indicators"] = {}
+            data["overall_signal"] = "N/A"
             return data
 
-        # Trend-Analyse
         data["trend"] = self._technical.calculate_trend(closes)
-
-        # Technische Indikatoren
         data["indicators"] = self._technical.calculate_all_indicators(
-            closes=closes,
-            highs=highs,
-            lows=lows,
-            volumes=volumes,
+            closes=closes, highs=highs, lows=lows, volumes=volumes
         )
-
-        # Volumen-Analyse
         data["volume_analysis"] = self._technical.analyze_volume(volumes)
-
-        # Gesamtsignal
-        data["overall_signal"] = self._technical.get_overall_signal(
-            data["indicators"]
-        )
+        data["overall_signal"] = self._technical.get_overall_signal(data["indicators"])
 
         return data
 
     # =========================================================================
-    # PERIOD CHANGES
+    # HELPER METHODS
     # =========================================================================
 
-    def _calculate_period_changes(
-        self, history, current_price: float
-    ) -> dict[str, float | None]:
+    def _calculate_period_changes(self, history, current_price: float) -> dict[str, float | None]:
         """Calculate price changes for different periods."""
         result = {}
-
         closes = history["Close"]
 
         if len(closes) < 2:
             return result
 
-        # 1 Woche
         if len(closes) >= 5:
             week_ago = closes.iloc[-5]
-            result["week_change"] = round(current_price - week_ago, 4)
-            result["week_change_percent"] = round(
-                ((current_price - week_ago) / week_ago) * 100, 2
-            )
+            result["week_change_percent"] = round(((current_price - week_ago) / week_ago) * 100, 2)
 
-        # 1 Monat
         if len(closes) >= 21:
             month_ago = closes.iloc[-21]
-            result["month_change"] = round(current_price - month_ago, 4)
-            result["month_change_percent"] = round(
-                ((current_price - month_ago) / month_ago) * 100, 2
-            )
+            result["month_change_percent"] = round(((current_price - month_ago) / month_ago) * 100, 2)
 
-        # 3 Monate
         if len(closes) >= 63:
             quarter_ago = closes.iloc[-63]
-            result["quarter_change"] = round(current_price - quarter_ago, 4)
-            result["quarter_change_percent"] = round(
-                ((current_price - quarter_ago) / quarter_ago) * 100, 2
-            )
+            result["quarter_change_percent"] = round(((current_price - quarter_ago) / quarter_ago) * 100, 2)
 
-        # YTD
         try:
             from datetime import datetime
             current_year = datetime.now().year
             ytd_data = closes[closes.index.year == current_year]
             if not ytd_data.empty:
                 year_start = ytd_data.iloc[0]
-                result["ytd_change"] = round(
-                    current_price - year_start, 4
-                )
-                result["ytd_change_percent"] = round(
-                    ((current_price - year_start) / year_start) * 100, 2
-                )
+                result["ytd_change_percent"] = round(((current_price - year_start) / year_start) * 100, 2)
         except Exception:
             pass
 
         return result
-
-    # =========================================================================
-    # HELPER METHODS
-    # =========================================================================
 
     def _get_history_safe(self, ticker, period: str = "3mo"):
         """Safely get historical data."""
@@ -980,7 +945,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @staticmethod
     def _safe_percent(value) -> float | None:
-        """Convert decimal to percentage safely."""
+        """Convert decimal to percentage."""
         if value is not None:
             try:
                 return round(float(value) * 100, 2)
@@ -988,8 +953,27 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pass
         return None
 
+    @staticmethod
+    def _format_market_cap(value) -> str:
+        """Format market cap to readable string."""
+        try:
+            value = float(value)
+            if value <= 0:
+                return "N/A"
+            if value >= 1_000_000_000_000:
+                return f"{value / 1_000_000_000_000:.2f}T"
+            elif value >= 1_000_000_000:
+                return f"{value / 1_000_000_000:.2f}B"
+            elif value >= 1_000_000:
+                return f"{value / 1_000_000:.2f}M"
+            elif value >= 1_000:
+                return f"{value / 1_000:.2f}K"
+            return f"{value:.2f}"
+        except (ValueError, TypeError):
+            return "N/A"
+
     def _empty_data(self, symbol: str) -> dict[str, Any]:
-        """Return empty data structure for a failed symbol."""
+        """Return empty data structure."""
         return {
             "symbol": symbol,
             "company_name": symbol,
@@ -997,15 +981,14 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "change": None,
             "change_percent": None,
             "market_cap": None,
+            "market_cap_formatted": "N/A",
             "circulating_supply": None,
             "total_supply": None,
             "max_supply": None,
-            "shares_outstanding": None,
             "data_source": "none",
             "data_quality": "unavailable",
             "trend": {"direction": "unknown", "strength": 0},
             "indicators": {},
-            "volume_analysis": {},
             "overall_signal": "N/A",
         }
 
@@ -1014,45 +997,117 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # =========================================================================
 
     def add_symbol(self, symbol: str) -> None:
-        """Add a symbol to tracking."""
+        """Add a symbol."""
         symbol = symbol.upper().strip()
         if symbol not in self.symbols:
             self.symbols.append(symbol)
             _LOGGER.info("Added symbol: %s", symbol)
 
     def remove_symbol(self, symbol: str) -> None:
-        """Remove a symbol from tracking."""
+        """Remove a symbol."""
         symbol = symbol.upper().strip()
         if symbol in self.symbols:
             self.symbols.remove(symbol)
             _LOGGER.info("Removed symbol: %s", symbol)
 
     # =========================================================================
-    # STATIC METHODS
+    # STATIC METHODS (for config flow & services)
     # =========================================================================
 
     @staticmethod
     def validate_symbol(symbol: str) -> bool:
         """Validate if a symbol exists."""
+        symbol = symbol.upper().strip()
+        
+        # Check if it's a crypto pattern
+        crypto_patterns = [
+            r"^[A-Z0-9]{2,10}-USD$",
+            r"^[A-Z0-9]{2,10}-EUR$",
+        ]
+        
+        is_crypto = any(re.match(p, symbol) for p in crypto_patterns)
+        
+        if is_crypto:
+            # Validate via CoinGecko search
+            try:
+                base = symbol.split("-")[0] if "-" in symbol else symbol
+                url = f"https://api.coingecko.com/api/v3/search?query={base}"
+                response = requests.get(url, headers=HEADERS, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    coins = data.get("coins", [])
+                    for coin in coins:
+                        if coin.get("symbol", "").upper() == base:
+                            return True
+                    return len(coins) > 0
+            except Exception:
+                pass
+        
+        # Validate via yfinance
         try:
-            ticker = yf.Ticker(symbol.upper().strip())
+            ticker = yf.Ticker(symbol)
             info = ticker.info
-            return bool(
-                info
-                and (
-                    info.get("regularMarketPrice") is not None
-                    or info.get("previousClose") is not None
-                    or info.get("shortName") is not None
-                )
-            )
+            return bool(info and (
+                info.get("regularMarketPrice") is not None
+                or info.get("previousClose") is not None
+                or info.get("shortName") is not None
+            ))
         except Exception:
             return False
 
     @staticmethod
     def search_symbols(query: str, limit: int = 10) -> list[dict[str, Any]]:
-        """Search for symbols."""
+        """Search for stocks AND crypto symbols."""
         results = []
+        query = query.strip()
+        
+        if not query:
+            return results
 
+        # 1. Search CoinGecko first (crypto) - they have better search
+        try:
+            url = "https://api.coingecko.com/api/v3/search"
+            params = {"query": query}
+            
+            response = requests.get(url, params=params, headers=HEADERS, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                coins = data.get("coins", [])
+                
+                for coin in coins[:limit]:
+                    symbol = coin.get("symbol", "").upper()
+                    name = coin.get("name", symbol)
+                    market_cap_rank = coin.get("market_cap_rank")
+                    
+                    # Add USD version
+                    yahoo_symbol = f"{symbol}-USD"
+                    results.append({
+                        "symbol": yahoo_symbol,
+                        "name": name,
+                        "exchange": "Crypto",
+                        "type": "CRYPTOCURRENCY",
+                        "source": "coingecko",
+                        "coingecko_id": coin.get("id"),
+                        "market_cap_rank": market_cap_rank,
+                    })
+                    
+                    # Also add EUR version
+                    eur_symbol = f"{symbol}-EUR"
+                    results.append({
+                        "symbol": eur_symbol,
+                        "name": f"{name} (EUR)",
+                        "exchange": "Crypto",
+                        "type": "CRYPTOCURRENCY",
+                        "source": "coingecko",
+                        "coingecko_id": coin.get("id"),
+                        "market_cap_rank": market_cap_rank,
+                    })
+                        
+        except Exception as err:
+            _LOGGER.debug("CoinGecko search error: %s", err)
+
+        # 2. Search Yahoo Finance (stocks, ETFs, indices)
         try:
             url = "https://query2.finance.yahoo.com/v1/finance/search"
             params = {
@@ -1060,37 +1115,50 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "quotesCount": limit,
                 "newsCount": 0,
                 "listsCount": 0,
-                "enableFuzzyQuery": True,
             }
 
-            response = requests.get(
-                url, params=params, headers=HEADERS, timeout=10
-            )
+            response = requests.get(url, params=params, headers=HEADERS, timeout=10)
 
             if response.status_code == 200:
                 data = response.json()
                 for quote in data.get("quotes", []):
-                    results.append({
-                        "symbol": quote.get("symbol", ""),
-                        "name": quote.get("shortname", quote.get("longname", "")),
-                        "exchange": quote.get("exchange", ""),
-                        "type": quote.get("quoteType", ""),
-                    })
-
+                    symbol = quote.get("symbol", "")
+                    quote_type = quote.get("quoteType", "EQUITY")
+                    
+                    # Skip if already in results (crypto duplicates)
+                    if any(r["symbol"] == symbol for r in results):
+                        continue
+                    
+                    # Skip Yahoo's crypto entries (we have better from CoinGecko)
+                    if quote_type == "CRYPTOCURRENCY":
+                        continue
+                    
+                    if symbol:
+                        results.append({
+                            "symbol": symbol,
+                            "name": quote.get("shortname", quote.get("longname", symbol)),
+                            "exchange": quote.get("exchange", ""),
+                            "type": quote_type,
+                            "source": "yahoo",
+                        })
         except Exception as err:
-            _LOGGER.debug("Symbol search error: %s", err)
+            _LOGGER.debug("Yahoo search error: %s", err)
 
-            try:
-                ticker = yf.Ticker(query.upper())
-                info = ticker.info
-                if info and info.get("shortName"):
-                    results.append({
-                        "symbol": query.upper(),
-                        "name": info.get("shortName", query.upper()),
-                        "exchange": info.get("exchange", ""),
-                        "type": info.get("quoteType", ""),
-                    })
-            except Exception:
-                pass
-
-        return results[:limit]
+        # Sort: Crypto with market cap rank first, then by name
+        def sort_key(item):
+            if item.get("type") == "CRYPTOCURRENCY":
+                rank = item.get("market_cap_rank") or 9999
+                return (0, rank, item.get("name", ""))
+            return (1, 0, item.get("name", ""))
+        
+        results.sort(key=sort_key)
+        
+        # Remove duplicates and limit
+        seen = set()
+        unique_results = []
+        for r in results:
+            if r["symbol"] not in seen:
+                seen.add(r["symbol"])
+                unique_results.append(r)
+        
+        return unique_results[:limit * 2]

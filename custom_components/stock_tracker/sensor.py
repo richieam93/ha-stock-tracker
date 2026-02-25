@@ -227,8 +227,18 @@ class StockPriceSensor(StockBaseSensor):
         self._add_attr(attrs, data, "volume")
         self._add_attr(attrs, data, "avg_volume")
 
-        # --- Marktdaten ---
-        self._add_attr_formatted(attrs, data, "market_cap", self._format_large_number)
+        # --- Marktdaten (FIXED!) ---
+        mc = data.get("market_cap")
+        mc_fmt = data.get("market_cap_formatted")
+        if mc is not None:
+            try:
+                mc_float = float(mc)
+                if mc_float > 0:
+                    attrs["market_cap"] = mc
+                    attrs["market_cap_formatted"] = mc_fmt if mc_fmt and mc_fmt != "N/A" else self._format_large_number(mc)
+            except (ValueError, TypeError):
+                pass
+        
         self._add_attr(attrs, data, "shares_outstanding")
 
         # --- Supply (Krypto) ---
@@ -264,6 +274,13 @@ class StockPriceSensor(StockBaseSensor):
         self._add_attr(attrs, data, "recommendation")
         self._add_attr(attrs, data, "number_of_analysts")
         self._add_attr(attrs, data, "beta")
+
+        # --- Crypto-spezifisch ---
+        self._add_attr(attrs, data, "ath")
+        self._add_attr(attrs, data, "ath_change_percent")
+        self._add_attr(attrs, data, "atl")
+        self._add_attr(attrs, data, "market_cap_rank")
+        self._add_attr(attrs, data, "coingecko_id")
 
         # --- Meta ---
         self._add_attr(attrs, data, "data_source")
