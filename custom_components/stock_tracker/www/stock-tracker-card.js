@@ -1074,6 +1074,7 @@ class StockTrackerCardEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = {};
     this._hass = null;
+    this._rendered = false;
   }
 
   setConfig(config) {
@@ -1083,7 +1084,10 @@ class StockTrackerCardEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    // NUR beim ersten Mal rendern, nicht bei jedem hass-Update!
+    if (!this._rendered) {
+      this._render();
+    }
   }
 
   _getStockEntities() {
@@ -1092,14 +1096,12 @@ class StockTrackerCardEditor extends HTMLElement {
     const entities = [];
 
     for (const [entityId, state] of Object.entries(this._hass.states)) {
-      // Nur Sensoren die mit _price enden
       if (!entityId.startsWith('sensor.') || !entityId.endsWith('_price')) {
         continue;
       }
 
       const attrs = state.attributes || {};
       
-      // Prüfe ob es ein Stock Tracker Sensor ist
       const isStockSensor = (
         attrs.symbol !== undefined ||
         attrs.company_name !== undefined ||
@@ -1138,7 +1140,6 @@ class StockTrackerCardEditor extends HTMLElement {
       }
     }
 
-    // Alphabetisch sortieren
     entities.sort((a, b) => a.symbol.localeCompare(b.symbol));
     return entities;
   }
@@ -1186,6 +1187,7 @@ class StockTrackerCardEditor extends HTMLElement {
         select:focus, input:focus {
           outline: none;
           border-color: var(--primary-color, #03a9f4);
+          box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.2);
         }
         .checkbox-row {
           display: flex;
@@ -1204,7 +1206,6 @@ class StockTrackerCardEditor extends HTMLElement {
           cursor: pointer;
         }
         .info-box {
-          background: var(--info-color, #2196F3);
           background: rgba(33, 150, 243, 0.1);
           border: 1px solid rgba(33, 150, 243, 0.3);
           border-radius: 8px;
@@ -1288,13 +1289,35 @@ class StockTrackerCardEditor extends HTMLElement {
       </div>
     `;
 
-    // Event Listeners
-    this.shadowRoot.querySelectorAll('select, input').forEach(el => {
+    this._rendered = true;
+    this._attachEventListeners();
+  }
+
+  _attachEventListeners() {
+    // Select-Felder
+    this.shadowRoot.querySelectorAll('select').forEach(el => {
       el.addEventListener('change', (e) => this._valueChanged(e));
-      if (el.type === 'text') {
-        el.addEventListener('input', (e) => this._valueChanged(e));
-      }
     });
+
+    // Checkboxen
+    this.shadowRoot.querySelectorAll('input[type="checkbox"]').forEach(el => {
+      el.addEventListener('change', (e) => this._valueChanged(e));
+    });
+
+    // Text-Input mit Debounce
+    const nameInput = this.shadowRoot.getElementById('name');
+    if (nameInput) {
+      let timeout;
+      nameInput.addEventListener('input', (e) => {
+        clearTimeout(timeout);
+        timeout = setTimeout(() => this._valueChanged(e), 300);
+      });
+      // Auch bei blur sofort speichern
+      nameInput.addEventListener('blur', (e) => {
+        clearTimeout(timeout);
+        this._valueChanged(e);
+      });
+    }
   }
 
   _valueChanged(e) {
@@ -1321,6 +1344,7 @@ class StockTrackerCardEditor extends HTMLElement {
     this.dispatchEvent(event);
   }
 }
+
 
 
 // =============================================================================
