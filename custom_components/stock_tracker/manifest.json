@@ -11,6 +11,6 @@
     "yfinance==0.2.40",
     "beautifulsoup4==4.12.3"
   ],
-  "version": "1.3.9",
+  "version": "1.4.0",
   "integration_type": "hub"
 }
