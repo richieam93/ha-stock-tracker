@@ -193,72 +193,87 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
     """Copy custom card files to www/community/ directory."""
     import gzip
 
-    # Quellpfad (innerhalb der Integration)
-    card_source = os.path.join(
-        os.path.dirname(__file__),
-        "www",
-        "stock-tracker-card.js",
-    )
-
     # Zielpfad
     www_path = hass.config.path("www")
     target_dir = os.path.join(www_path, "community", "stock-tracker")
-    card_dest = os.path.join(target_dir, "stock-tracker-card.js")
-    card_dest_gz = os.path.join(target_dir, "stock-tracker-card.js.gz")
-
-    # Prüfe ob Quelle existiert
-    if not os.path.exists(card_source):
-        _LOGGER.warning(
-            "Card source not found: %s - Creating placeholder",
-            card_source
-        )
-        # Erstelle www-Ordner in der Integration falls nicht vorhanden
-        www_integration = os.path.join(os.path.dirname(__file__), "www")
-        os.makedirs(www_integration, exist_ok=True)
-        return False
-
+    
     # Zielordner erstellen
     os.makedirs(target_dir, exist_ok=True)
 
-    # Prüfen ob Kopieren nötig
-    should_copy = not os.path.exists(card_dest)
-    if not should_copy:
-        try:
-            if os.path.getmtime(card_source) > os.path.getmtime(card_dest):
+    # Liste der zu kopierenden Karten
+    card_files = [
+        "stock-tracker-card.js",
+        "stock-tracker-list-card.js",
+    ]
+
+    success = True
+
+    for card_file in card_files:
+        # Quellpfad (innerhalb der Integration)
+        card_source = os.path.join(
+            os.path.dirname(__file__),
+            "www",
+            card_file,
+        )
+
+        card_dest = os.path.join(target_dir, card_file)
+        card_dest_gz = os.path.join(target_dir, card_file + ".gz")
+
+        # Prüfe ob Quelle existiert
+        if not os.path.exists(card_source):
+            _LOGGER.warning(
+                "Card source not found: %s",
+                card_source
+            )
+            # Erstelle www-Ordner in der Integration falls nicht vorhanden
+            www_integration = os.path.join(os.path.dirname(__file__), "www")
+            os.makedirs(www_integration, exist_ok=True)
+            continue
+
+        # Prüfen ob Kopieren nötig
+        should_copy = not os.path.exists(card_dest)
+        if not should_copy:
+            try:
+                if os.path.getmtime(card_source) > os.path.getmtime(card_dest):
+                    should_copy = True
+            except OSError:
                 should_copy = True
-        except OSError:
-            should_copy = True
 
-    if not should_copy:
-        _LOGGER.debug("Card already up to date")
-        return True
+        if not should_copy:
+            _LOGGER.debug("Card %s already up to date", card_file)
+            continue
 
-    # Kopieren
-    try:
-        shutil.copy2(card_source, card_dest)
-        _LOGGER.info("Card copied to %s", card_dest)
-    except Exception as err:
-        _LOGGER.error("Failed to copy card: %s", err)
-        return False
+        # Kopieren
+        try:
+            shutil.copy2(card_source, card_dest)
+            _LOGGER.info("Card copied to %s", card_dest)
+        except Exception as err:
+            _LOGGER.error("Failed to copy card %s: %s", card_file, err)
+            success = False
+            continue
 
-    # .gz erstellen für schnelleres Laden
-    try:
-        with open(card_dest, "rb") as f_in:
-            with gzip.open(card_dest_gz, "wb", compresslevel=9) as f_out:
-                shutil.copyfileobj(f_in, f_out)
-        _LOGGER.debug("Card .gz created")
-    except Exception as err:
-        _LOGGER.debug("Could not create .gz: %s", err)
+        # .gz erstellen für schnelleres Laden
+        try:
+            with open(card_dest, "rb") as f_in:
+                with gzip.open(card_dest_gz, "wb", compresslevel=9) as f_out:
+                    shutil.copyfileobj(f_in, f_out)
+            _LOGGER.debug("Card %s.gz created", card_file)
+        except Exception as err:
+            _LOGGER.debug("Could not create .gz for %s: %s", card_file, err)
 
-    return True
+    return success
 
 
 # =============================================================================
 # LOVELACE RESOURCE AUTO-REGISTRIEREN
 # =============================================================================
 
+CARD_URL = "/local/community/stock-tracker/stock-tracker-card.js"
+LIST_CARD_URL = "/local/community/stock-tracker/stock-tracker-list-card.js"
+
+
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
-    """Automatically register the custom card as Lovelace resource."""
+    """Automatically register the custom cards as Lovelace resources."""
     try:
         # Warte kurz damit Lovelace initialisiert ist
         if "lovelace" not in hass.data:
@@ -270,9 +285,12 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
 
         if resources is None:
             _LOGGER.info(
-                "Auto-registration not possible. Add resource manually:\n"
-                "  URL: %s\n  Type: JavaScript Module",
+                "Auto-registration not possible. Add resources manually:\n"
+                "  URL: %s\n"
+                "  URL: %s\n"
+                "  Type: JavaScript Module",
                 CARD_URL,
+                LIST_CARD_URL,
             )
             return
 
@@ -280,7 +298,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         if hasattr(resources, "loaded") and not resources.loaded:
             await resources.async_load()
 
-        # Prüfe ob schon registriert
+        # Prüfe welche schon registriert sind
         existing_urls = set()
         try:
             for r in resources.async_items():
@@ -289,33 +307,39 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         except Exception:
             pass
 
-        # Alle bekannten URLs prüfen
-        known_urls = {
-            CARD_URL,
-            "/hacsfiles/stock-tracker/stock-tracker-card.js",
-            "/local/stock-tracker-card.js",
-            "/local/community/stock-tracker/stock-tracker-card.js",
-        }
+        # Alle bekannten URLs für beide Karten
+        card_urls = [
+            (CARD_URL, "stock-tracker-card"),
+            (LIST_CARD_URL, "stock-tracker-list-card"),
+        ]
 
-        if existing_urls & known_urls:
-            _LOGGER.debug("Card resource already registered")
-            return
+        for card_url, card_name in card_urls:
+            # Bekannte URL-Varianten prüfen
+            known_urls = {
+                card_url,
+                f"/hacsfiles/stock-tracker/{card_name}.js",
+                f"/local/{card_name}.js",
+                f"/local/community/stock-tracker/{card_name}.js",
+            }
 
-        # Resource registrieren
-        try:
-            await resources.async_create_item({
-                "res_type": "module",
-                "url": CARD_URL,
-            })
-            _LOGGER.info("✅ Custom card auto-registered: %s", CARD_URL)
-        except Exception as err:
-            _LOGGER.warning("Could not register resource: %s", err)
+            if existing_urls & known_urls:
+                _LOGGER.debug("Card %s already registered", card_name)
+                continue
+
+            # Resource registrieren
+            try:
+                await resources.async_create_item({
+                    "res_type": "module",
+                    "url": card_url,
+                })
+                _LOGGER.info("✅ Custom card auto-registered: %s", card_url)
+            except Exception as err:
+                _LOGGER.warning("Could not register %s: %s", card_name, err)
 
     except Exception as err:
         _LOGGER.warning(
-            "Could not auto-register Lovelace resource: %s", err
+            "Could not auto-register Lovelace resources: %s", err
         )
-
 
 # =============================================================================
 # DASHBOARD AUTO-ERSTELLEN UND AKTUALISIEREN
