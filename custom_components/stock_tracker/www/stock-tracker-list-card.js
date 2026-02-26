@@ -1,5 +1,5 @@
 /**
- * Stock Tracker List Card v1.0 for Home Assistant
+ * Stock Tracker List Card v1.0.1 for Home Assistant
  *
  * A comprehensive list/table view for all your tracked assets.
  *
@@ -1455,7 +1455,7 @@ class StockTrackerListCard extends HTMLElement {
 
 
 // =============================================================================
-// CARD EDITOR - MIT KORREKTEM LAYOUT
+// CARD EDITOR - VERBESSERT
 // =============================================================================
 
 class StockTrackerListCardEditor extends HTMLElement {
@@ -1464,30 +1464,21 @@ class StockTrackerListCardEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = {};
     this._hass = null;
+    this._expandedGroups = new Set(['INDEX', 'STOCK', 'CRYPTO']); // Standard-erweiterte Gruppen
   }
 
   setConfig(config) {
-    this._config = { 
-      ...config,
-      entities: config.entities ? [...config.entities] : []
-    };
-    this._render();
-  }
-
-  set hass(hass) {
-    const firstTime = !this._hass;
-    this._hass = hass;
-    if (firstTime) {
+    this._config = { ...config };
+    if (this._hass) {
       this._render();
     }
   }
 
-  get _entities() {
-    return this._config.entities || [];
-  }
-
-  set _entities(value) {
-    this._config.entities = value;
+  set hass(hass) {
+    this._hass = hass;
+    if (!this.shadowRoot.querySelector('.editor')) {
+      this._render();
+    }
   }
 
   _getStockEntities() {
@@ -1501,6 +1492,7 @@ class StockTrackerListCardEditor extends HTMLElement {
 
       const attrs = state.attributes || {};
       
+      // Prüfe ob es ein Stock Tracker Sensor ist
       const isStockSensor = (
         attrs.symbol !== undefined ||
         attrs.data_source !== undefined ||
@@ -1513,10 +1505,14 @@ class StockTrackerListCardEditor extends HTMLElement {
         const name = attrs.company_name || attrs.friendly_name || symbol;
         const price = state.state;
         const currency = attrs.currency || 'USD';
-        const assetType = attrs.asset_type || attrs.quote_type || 'STOCK';
+        let assetType = attrs.asset_type || attrs.quote_type || 'STOCK';
+        
+        // Normalisiere Asset-Typ
+        if (assetType === 'CRYPTOCURRENCY') assetType = 'CRYPTO';
+        if (assetType === 'EQUITY') assetType = 'STOCK';
 
         let typeIcon = '📈';
-        if (assetType === 'CRYPTOCURRENCY' || assetType === 'CRYPTO') typeIcon = '🪙';
+        if (assetType === 'CRYPTO') typeIcon = '🪙';
         else if (assetType === 'FOREX') typeIcon = '💱';
         else if (assetType === 'COMMODITY') typeIcon = '🛢️';
         else if (assetType === 'INDEX') typeIcon = '📊';
@@ -1535,9 +1531,10 @@ class StockTrackerListCardEditor extends HTMLElement {
       }
     }
 
+    // Sortieren nach Typ und Symbol
     entities.sort((a, b) => {
       if (a.type !== b.type) {
-        const typeOrder = { 'INDEX': 0, 'STOCK': 1, 'ETF': 2, 'CRYPTO': 3, 'CRYPTOCURRENCY': 3, 'FOREX': 4, 'COMMODITY': 5, 'BOND': 6 };
+        const typeOrder = { 'INDEX': 0, 'STOCK': 1, 'ETF': 2, 'CRYPTO': 3, 'FOREX': 4, 'COMMODITY': 5, 'BOND': 6 };
         return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
       }
       return a.symbol.localeCompare(b.symbol);
@@ -1554,46 +1551,51 @@ class StockTrackerListCardEditor extends HTMLElement {
 
     const c = this._config;
     const allEntities = this._getStockEntities();
-    const selectedEntities = this._entities;
+    const selectedEntities = c.entities || [];
+
+    // Gruppiere Entities nach Typ für bessere Übersicht
+    const groupedEntities = {};
+    allEntities.forEach(e => {
+      const type = e.type || 'OTHER';
+      if (!groupedEntities[type]) groupedEntities[type] = [];
+      groupedEntities[type].push(e);
+    });
 
     const typeLabels = {
       'INDEX': '📊 Indizes',
       'STOCK': '📈 Aktien',
       'ETF': '📦 ETFs',
       'CRYPTO': '🪙 Krypto',
-      'CRYPTOCURRENCY': '🪙 Krypto',
       'FOREX': '💱 Devisen',
       'COMMODITY': '🛢️ Rohstoffe',
       'BOND': '📜 Anleihen',
       'OTHER': '📋 Sonstige',
     };
 
-    // WICHTIG: Keine Gruppierung mehr - flache Liste für bessere Übersicht
     this.shadowRoot.innerHTML = `
       <style>
-        :host {
-          display: block !important;
-        }
-        
         .editor {
           display: flex;
           flex-direction: column;
           gap: 16px;
           padding: 16px;
+          max-height: none !important;
+          overflow: visible !important;
         }
-        
         .field {
           display: flex;
           flex-direction: column;
           gap: 6px;
         }
-        
         .field label {
           font-weight: 500;
           font-size: 14px;
           color: var(--primary-text-color);
         }
-        
+        .field .hint {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+        }
         select, input[type="text"] {
           padding: 10px 12px;
           border: 1px solid var(--divider-color, #e0e0e0);
@@ -1601,39 +1603,30 @@ class StockTrackerListCardEditor extends HTMLElement {
           background: var(--card-background-color);
           font-size: 14px;
           color: var(--primary-text-color);
-          width: 100%;
-          box-sizing: border-box;
         }
-        
         .checkbox-row {
           display: flex;
           align-items: center;
           gap: 10px;
           padding: 4px 0;
         }
-        
         .checkbox-row input[type="checkbox"] {
           width: 18px;
           height: 18px;
           cursor: pointer;
-          flex-shrink: 0;
         }
-        
         .checkbox-row label {
           cursor: pointer;
           user-select: none;
         }
-        
         details {
           border: 1px solid var(--divider-color, #e0e0e0);
           border-radius: 8px;
           overflow: visible;
         }
-        
         details[open] {
           overflow: visible;
         }
-        
         summary {
           padding: 12px 14px;
           font-weight: 600;
@@ -1641,22 +1634,7 @@ class StockTrackerListCardEditor extends HTMLElement {
           cursor: pointer;
           background: var(--secondary-background-color);
           user-select: none;
-          list-style: none;
         }
-        
-        summary::-webkit-details-marker {
-          display: none;
-        }
-        
-        summary::before {
-          content: "▶ ";
-          font-size: 10px;
-        }
-        
-        details[open] summary::before {
-          content: "▼ ";
-        }
-        
         .group {
           padding: 12px 14px;
           display: flex;
@@ -1664,142 +1642,152 @@ class StockTrackerListCardEditor extends HTMLElement {
           gap: 10px;
         }
         
-        /* ========== ENTITY SELECTION - FIXED ========== */
-        .entity-section {
+        /* Entity Selection - VERBESSERT */
+        .entity-selection-wrapper {
           border: 1px solid var(--divider-color, #e0e0e0);
           border-radius: 8px;
           overflow: hidden;
         }
         
-        .entity-header {
-          padding: 12px 14px;
-          background: var(--secondary-background-color);
+        .entity-selection-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          flex-wrap: wrap;
-          gap: 8px;
+          padding: 10px 12px;
+          background: var(--primary-color);
+          color: white;
         }
         
-        .entity-header-title {
+        .entity-selection-header .count {
           font-weight: 600;
-          font-size: 14px;
         }
         
-        .entity-header-actions {
+        .entity-selection-header .actions {
           display: flex;
           gap: 8px;
         }
         
-        .action-btn {
-          padding: 6px 12px;
-          border: 1px solid var(--divider-color);
-          border-radius: 6px;
-          background: var(--card-background-color);
+        .entity-selection-header button {
+          padding: 4px 10px;
+          border: 1px solid rgba(255,255,255,0.3);
+          border-radius: 4px;
+          background: rgba(255,255,255,0.1);
+          color: white;
           cursor: pointer;
           font-size: 12px;
-          color: var(--primary-text-color);
         }
         
-        .action-btn:hover {
+        .entity-selection-header button:hover {
+          background: rgba(255,255,255,0.2);
+        }
+        
+        .entity-selection {
+          max-height: 400px;
+          overflow-y: auto;
+        }
+        
+        .entity-group {
+          border-bottom: 1px solid var(--divider-color, #e0e0e0);
+        }
+        .entity-group:last-child {
+          border-bottom: none;
+        }
+        .entity-group-header {
+          padding: 10px 12px;
+          background: var(--secondary-background-color);
+          font-weight: 600;
+          font-size: 13px;
+          color: var(--primary-text-color);
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          cursor: pointer;
+          user-select: none;
+        }
+        .entity-group-header:hover {
+          background: var(--divider-color);
+        }
+        .entity-group-header .group-info {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .entity-group-header .group-count {
+          font-size: 11px;
+          color: var(--secondary-text-color);
+          font-weight: normal;
+        }
+        .entity-group-header .expand-icon {
+          font-size: 10px;
+          transition: transform 0.2s;
+        }
+        .entity-group.collapsed .expand-icon {
+          transform: rotate(-90deg);
+        }
+        .entity-group.collapsed .entity-group-items {
+          display: none;
+        }
+        .select-all-btn {
+          font-size: 11px;
+          padding: 3px 8px;
+          border: 1px solid var(--divider-color);
+          border-radius: 4px;
+          background: var(--card-background-color);
+          cursor: pointer;
+        }
+        .select-all-btn:hover {
           background: var(--primary-color);
           color: white;
           border-color: var(--primary-color);
         }
-        
-        .selected-count {
-          padding: 8px 12px;
-          background: var(--primary-color);
-          color: white;
-          font-size: 13px;
-          text-align: center;
+        .entity-group-items {
+          max-height: 200px;
+          overflow-y: auto;
         }
-        
-        .selected-count.warning {
-          background: #ff9800;
-        }
-        
-        /* ENTITY LIST - DAS IST DER WICHTIGE TEIL */
-        .entity-list {
-          max-height: 350px;        /* Feste maximale Höhe */
-          min-height: 200px;        /* Mindesthöhe */
-          overflow-y: auto !important;  /* Scrollbar */
-          overflow-x: hidden;
-          display: block !important;
-          background: var(--card-background-color);
-        }
-        
         .entity-item {
-          display: flex !important;
+          display: flex;
           align-items: center;
-          padding: 12px 14px;
-          gap: 12px;
-          border-bottom: 1px solid var(--divider-color, rgba(0,0,0,0.08));
+          padding: 10px 12px;
+          gap: 10px;
+          border-bottom: 1px solid var(--divider-color, #e0e0e0);
           cursor: pointer;
-          transition: background 0.15s;
-          min-height: 48px;
-          box-sizing: border-box;
         }
-        
         .entity-item:last-child {
           border-bottom: none;
         }
-        
         .entity-item:hover {
           background: var(--secondary-background-color);
         }
-        
         .entity-item.selected {
-          background: rgba(76, 175, 80, 0.15);
+          background: rgba(var(--rgb-primary-color, 33, 150, 243), 0.1);
         }
-        
-        .entity-item input[type="checkbox"] {
-          width: 20px;
-          height: 20px;
+        .entity-item input {
+          width: 18px;
+          height: 18px;
           cursor: pointer;
           flex-shrink: 0;
-          accent-color: var(--primary-color, #03a9f4);
         }
-        
-        .entity-icon {
-          font-size: 20px;
+        .entity-item .icon {
+          font-size: 18px;
           flex-shrink: 0;
-          width: 28px;
-          text-align: center;
         }
-        
-        .entity-info {
+        .entity-item .info {
           flex: 1;
           min-width: 0;
-          overflow: hidden;
         }
-        
-        .entity-symbol {
+        .entity-item .symbol {
           font-weight: 600;
-          font-size: 14px;
-          color: var(--primary-text-color);
+          font-size: 13px;
         }
-        
-        .entity-name {
+        .entity-item .name {
           font-size: 11px;
           color: var(--secondary-text-color);
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
-        
-        .entity-price {
+        .entity-item .price {
           font-size: 12px;
-          color: var(--secondary-text-color);
-          flex-shrink: 0;
-          text-align: right;
-        }
-        
-        .entity-type-badge {
-          font-size: 10px;
-          padding: 2px 6px;
-          border-radius: 4px;
-          background: var(--secondary-background-color);
           color: var(--secondary-text-color);
           flex-shrink: 0;
         }
@@ -1810,84 +1798,116 @@ class StockTrackerListCardEditor extends HTMLElement {
           color: var(--secondary-text-color);
         }
         
-        .no-entities p {
-          margin: 8px 0;
+        .info-box {
+          background: rgba(33, 150, 243, 0.1);
+          border: 1px solid rgba(33, 150, 243, 0.3);
+          border-radius: 8px;
+          padding: 12px;
+          font-size: 12px;
         }
         
-        /* Scrollbar Styling */
-        .entity-list::-webkit-scrollbar {
-          width: 8px;
+        /* Quick Actions */
+        .quick-actions {
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+          margin-bottom: 8px;
         }
-        
-        .entity-list::-webkit-scrollbar-track {
-          background: var(--secondary-background-color);
+        .quick-action {
+          padding: 6px 12px;
+          border: 1px solid var(--divider-color);
+          border-radius: 16px;
+          background: var(--card-background-color);
+          cursor: pointer;
+          font-size: 12px;
+          transition: all 0.2s;
         }
-        
-        .entity-list::-webkit-scrollbar-thumb {
-          background: var(--divider-color);
-          border-radius: 4px;
-        }
-        
-        .entity-list::-webkit-scrollbar-thumb:hover {
+        .quick-action:hover {
           background: var(--primary-color);
+          color: white;
+          border-color: var(--primary-color);
+        }
+        .quick-action.active {
+          background: var(--primary-color);
+          color: white;
+          border-color: var(--primary-color);
         }
       </style>
       
       <div class="editor">
-      
-        <!-- ========== ENTITY AUSWAHL ========== -->
-        <div class="entity-section">
-          <div class="entity-header">
-            <span class="entity-header-title">📊 Assets auswählen</span>
-            <div class="entity-header-actions">
-              <button type="button" class="action-btn" id="btn-select-all">✓ Alle</button>
-              <button type="button" class="action-btn" id="btn-select-none">✗ Keine</button>
-            </div>
+        <!-- ENTITIES AUSWAHL -->
+        <details open>
+          <summary>📊 Assets auswählen (${selectedEntities.length}/${allEntities.length})</summary>
+          <div class="group">
+            ${allEntities.length === 0 ? `
+              <div class="no-entities">
+                <p style="font-size:24px;margin-bottom:12px">📊</p>
+                <p style="font-weight:600;margin-bottom:8px">Keine Stock Tracker Sensoren gefunden</p>
+                <p style="font-size:11px">Füge zuerst Assets über die Stock Tracker Integration hinzu.</p>
+              </div>
+            ` : `
+              <!-- Quick Actions -->
+              <div class="quick-actions">
+                <button class="quick-action" id="select-all">✓ Alle auswählen</button>
+                <button class="quick-action" id="select-none">✗ Keine</button>
+                ${Object.keys(groupedEntities).map(type => `
+                  <button class="quick-action" data-select-type="${type}">
+                    ${typeLabels[type]?.split(' ')[0] || ''} ${type}
+                  </button>
+                `).join('')}
+              </div>
+              
+              <div class="entity-selection-wrapper">
+                <div class="entity-selection-header">
+                  <span class="count">${selectedEntities.length} von ${allEntities.length} ausgewählt</span>
+                </div>
+                <div class="entity-selection">
+                  ${Object.entries(groupedEntities).map(([type, entities]) => {
+                    const selectedInGroup = entities.filter(e => selectedEntities.includes(e.id)).length;
+                    const isExpanded = this._expandedGroups.has(type);
+                    return `
+                      <div class="entity-group ${isExpanded ? '' : 'collapsed'}" data-group-type="${type}">
+                        <div class="entity-group-header">
+                          <div class="group-info">
+                            <span class="expand-icon">▼</span>
+                            <span>${typeLabels[type] || type}</span>
+                            <span class="group-count">(${selectedInGroup}/${entities.length})</span>
+                          </div>
+                          <button class="select-all-btn" data-type="${type}">
+                            ${selectedInGroup === entities.length ? 'Keine' : 'Alle'}
+                          </button>
+                        </div>
+                        <div class="entity-group-items">
+                          ${entities.map(e => `
+                            <div class="entity-item ${selectedEntities.includes(e.id) ? 'selected' : ''}" data-entity-id="${e.id}">
+                              <input type="checkbox" 
+                                     class="entity-checkbox"
+                                     data-entity="${e.id}" 
+                                     ${selectedEntities.includes(e.id) ? 'checked' : ''}>
+                              <span class="icon">${e.typeIcon}</span>
+                              <div class="info">
+                                <div class="symbol">${e.symbol}</div>
+                                <div class="name" title="${e.name}">${e.name}</div>
+                              </div>
+                              <span class="price">${e.price} ${e.currency}</span>
+                            </div>
+                          `).join('')}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              </div>
+            `}
           </div>
-          
-          <div class="selected-count ${selectedEntities.length === 0 ? 'warning' : ''}" id="selected-count">
-            ${selectedEntities.length === 0 
-              ? '⚠️ Keine Assets ausgewählt'
-              : `✅ ${selectedEntities.length} von ${allEntities.length} Assets ausgewählt`
-            }
-          </div>
-          
-          ${allEntities.length === 0 ? `
-            <div class="no-entities">
-              <p>⚠️ Keine Stock Tracker Sensoren gefunden.</p>
-              <p>Füge zuerst Assets über die Stock Tracker Integration hinzu.</p>
-            </div>
-          ` : `
-            <div class="entity-list" id="entity-list">
-              ${allEntities.map(e => {
-                const isChecked = selectedEntities.includes(e.id);
-                return `
-                  <div class="entity-item ${isChecked ? 'selected' : ''}" data-entity-id="${e.id}">
-                    <input type="checkbox" 
-                           class="entity-checkbox"
-                           data-entity="${e.id}" 
-                           ${isChecked ? 'checked' : ''}>
-                    <span class="entity-icon">${e.typeIcon}</span>
-                    <div class="entity-info">
-                      <div class="entity-symbol">${e.symbol}</div>
-                      <div class="entity-name">${e.name}</div>
-                    </div>
-                    <span class="entity-type-badge">${e.type}</span>
-                    <span class="entity-price">${e.price} ${e.currency}</span>
-                  </div>
-                `;
-              }).join('')}
-            </div>
-          `}
-        </div>
+        </details>
 
-        <!-- ========== TITEL ========== -->
+        <!-- TITEL & MODUS -->
         <div class="field">
-          <label>📋 Titel</label>
+          <label>📊 Titel</label>
           <input type="text" id="title" value="${c.title || '📊 Portfolio'}" placeholder="Portfolio">
         </div>
 
-        <!-- ========== ANZEIGE-MODUS ========== -->
         <div class="field">
           <label>🎨 Anzeige-Modus</label>
           <select id="display_mode">
@@ -1897,7 +1917,7 @@ class StockTrackerListCardEditor extends HTMLElement {
           </select>
         </div>
 
-        <!-- ========== SPALTEN ========== -->
+        <!-- SICHTBARE SPALTEN -->
         <details>
           <summary>👁️ Sichtbare Spalten</summary>
           <div class="group">
@@ -1915,7 +1935,7 @@ class StockTrackerListCardEditor extends HTMLElement {
             </div>
             <div class="checkbox-row">
               <input type="checkbox" id="show_sparkline" ${c.show_sparkline !== false ? 'checked' : ''}>
-              <label for="show_sparkline">Mini-Chart</label>
+              <label for="show_sparkline">Mini-Chart (Sparkline)</label>
             </div>
             <div class="checkbox-row">
               <input type="checkbox" id="show_market_cap" ${c.show_market_cap ? 'checked' : ''}>
@@ -1940,9 +1960,9 @@ class StockTrackerListCardEditor extends HTMLElement {
           </div>
         </details>
 
-        <!-- ========== SORTIERUNG ========== -->
+        <!-- SORTIERUNG -->
         <details>
-          <summary>📊 Sortierung</summary>
+          <summary>📊 Sortierung & Gruppierung</summary>
           <div class="group">
             <div class="field">
               <label>Sortieren nach</label>
@@ -1955,23 +1975,72 @@ class StockTrackerListCardEditor extends HTMLElement {
               </select>
             </div>
             <div class="field">
-              <label>Reihenfolge</label>
+              <label>Sortier-Reihenfolge</label>
               <select id="sort_order">
-                <option value="asc" ${c.sort_order === 'asc' ? 'selected' : ''}>Aufsteigend</option>
-                <option value="desc" ${c.sort_order === 'desc' ? 'selected' : ''}>Absteigend</option>
+                <option value="asc" ${c.sort_order === 'asc' ? 'selected' : ''}>Aufsteigend (A-Z, 0-9)</option>
+                <option value="desc" ${c.sort_order === 'desc' ? 'selected' : ''}>Absteigend (Z-A, 9-0)</option>
               </select>
             </div>
             <div class="field">
-              <label>Gruppieren</label>
+              <label>Gruppieren nach</label>
               <select id="group_by">
-                <option value="" ${!c.group_by ? 'selected' : ''}>Keine</option>
-                <option value="type" ${c.group_by === 'type' ? 'selected' : ''}>Nach Typ</option>
+                <option value="" ${!c.group_by ? 'selected' : ''}>Keine Gruppierung</option>
+                <option value="type" ${c.group_by === 'type' ? 'selected' : ''}>Asset-Typ</option>
+                <option value="sector" ${c.group_by === 'sector' ? 'selected' : ''}>Sektor</option>
               </select>
             </div>
           </div>
         </details>
 
-        <!-- ========== WEITERE ========== -->
+        <!-- PERFORMER -->
+        <details>
+          <summary>🏆 Performer-Anzeige</summary>
+          <div class="group">
+            <div class="checkbox-row">
+              <input type="checkbox" id="show_top_performers" ${c.show_top_performers ? 'checked' : ''}>
+              <label for="show_top_performers">Top Performer anzeigen</label>
+            </div>
+            <div class="checkbox-row">
+              <input type="checkbox" id="show_worst_performers" ${c.show_worst_performers ? 'checked' : ''}>
+              <label for="show_worst_performers">Schlechteste Performer anzeigen</label>
+            </div>
+            <div class="field">
+              <label>Anzahl Performer</label>
+              <select id="performers_count">
+                <option value="3" ${(c.performers_count || 3) === 3 ? 'selected' : ''}>3</option>
+                <option value="5" ${c.performers_count === 5 ? 'selected' : ''}>5</option>
+                <option value="10" ${c.performers_count === 10 ? 'selected' : ''}>10</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <!-- PORTFOLIO -->
+        <details>
+          <summary>💰 Portfolio-Wert</summary>
+          <div class="group">
+            <div class="checkbox-row">
+              <input type="checkbox" id="show_total_value" ${c.show_total_value ? 'checked' : ''}>
+              <label for="show_total_value">Portfolio-Gesamtwert anzeigen</label>
+            </div>
+            <div class="checkbox-row">
+              <input type="checkbox" id="show_total_change" ${c.show_total_change ? 'checked' : ''}>
+              <label for="show_total_change">Tagesänderung anzeigen</label>
+            </div>
+            <div class="info-box">
+              💡 <strong>Holdings konfigurieren:</strong><br><br>
+              Um den Portfolio-Wert zu berechnen, füge Holdings im YAML-Modus hinzu:<br>
+              <code style="font-size:11px;display:block;margin-top:8px;background:var(--secondary-background-color);padding:8px;border-radius:4px">
+              holdings:<br>
+              &nbsp;&nbsp;AAPL: 10<br>
+              &nbsp;&nbsp;BTC-USD: 0.5<br>
+              &nbsp;&nbsp;MSFT: 25
+              </code>
+            </div>
+          </div>
+        </details>
+
+        <!-- WEITERE OPTIONEN -->
         <details>
           <summary>⚙️ Weitere Optionen</summary>
           <div class="group">
@@ -1981,22 +2050,10 @@ class StockTrackerListCardEditor extends HTMLElement {
             </div>
             <div class="checkbox-row">
               <input type="checkbox" id="popup_on_click" ${c.popup_on_click !== false ? 'checked' : ''}>
-              <label for="popup_on_click">Popup bei Klick</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_top_performers" ${c.show_top_performers ? 'checked' : ''}>
-              <label for="show_top_performers">Top Performer zeigen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_worst_performers" ${c.show_worst_performers ? 'checked' : ''}>
-              <label for="show_worst_performers">Schlechteste zeigen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_total_value" ${c.show_total_value ? 'checked' : ''}>
-              <label for="show_total_value">Portfolio-Wert zeigen</label>
+              <label for="popup_on_click">Popup bei Klick öffnen</label>
             </div>
             <div class="field">
-              <label>Max. Anzahl</label>
+              <label>Maximale Anzahl Assets</label>
               <select id="max_items">
                 <option value="10" ${c.max_items === 10 ? 'selected' : ''}>10</option>
                 <option value="25" ${c.max_items === 25 ? 'selected' : ''}>25</option>
@@ -2006,7 +2063,6 @@ class StockTrackerListCardEditor extends HTMLElement {
             </div>
           </div>
         </details>
-        
       </div>
     `;
 
@@ -2014,143 +2070,218 @@ class StockTrackerListCardEditor extends HTMLElement {
   }
 
   _attachListeners() {
-    // Entity Checkboxen
-    this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
-      cb.addEventListener('click', (e) => e.stopPropagation());
-      cb.addEventListener('change', (e) => {
-        const item = cb.closest('.entity-item');
-        if (item) item.classList.toggle('selected', cb.checked);
-        this._toggleEntity(cb.dataset.entity, cb.checked);
-      });
-    });
-
-    // Entity Item Klick
-    this.shadowRoot.querySelectorAll('.entity-item').forEach(item => {
-      item.addEventListener('click', (e) => {
-        if (e.target.type === 'checkbox') return;
-        const cb = item.querySelector('.entity-checkbox');
-        if (cb) {
-          cb.checked = !cb.checked;
-          item.classList.toggle('selected', cb.checked);
-          this._toggleEntity(cb.dataset.entity, cb.checked);
+    // Group headers (expand/collapse)
+    this.shadowRoot.querySelectorAll('.entity-group-header').forEach(header => {
+      header.addEventListener('click', (e) => {
+        // Ignoriere Klicks auf den "Alle" Button
+        if (e.target.classList.contains('select-all-btn')) return;
+        
+        const group = header.closest('.entity-group');
+        const type = group.dataset.groupType;
+        
+        if (this._expandedGroups.has(type)) {
+          this._expandedGroups.delete(type);
+          group.classList.add('collapsed');
+        } else {
+          this._expandedGroups.add(type);
+          group.classList.remove('collapsed');
         }
       });
     });
 
-    // Alle auswählen
-    const btnAll = this.shadowRoot.getElementById('btn-select-all');
-    if (btnAll) {
-      btnAll.addEventListener('click', () => this._selectAll(true));
+    // Entity items (click anywhere to toggle)
+    this.shadowRoot.querySelectorAll('.entity-item').forEach(item => {
+      item.addEventListener('click', (e) => {
+        // Verhindere doppeltes Auslösen wenn direkt auf Checkbox geklickt
+        if (e.target.type === 'checkbox') return;
+        
+        const checkbox = item.querySelector('.entity-checkbox');
+        if (checkbox) {
+          checkbox.checked = !checkbox.checked;
+          this._updateEntities();
+        }
+      });
+    });
+
+    // Entity checkboxes
+    this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => this._updateEntities());
+    });
+
+    // Select all buttons per group
+    this.shadowRoot.querySelectorAll('.select-all-btn').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const type = btn.dataset.type;
+        const group = btn.closest('.entity-group');
+        const checkboxes = group.querySelectorAll('.entity-checkbox');
+        
+        // Toggle: Wenn alle gecheckt, alle unchecken, sonst alle checken
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
+        
+        // Button-Text aktualisieren
+        btn.textContent = allChecked ? 'Alle' : 'Keine';
+        
+        this._updateEntities();
+      });
+    });
+
+    // Quick action: Select All
+    const selectAllBtn = this.shadowRoot.getElementById('select-all');
+    if (selectAllBtn) {
+      selectAllBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
+          cb.checked = true;
+        });
+        this._updateEntities();
+      });
     }
 
-    // Keine auswählen
-    const btnNone = this.shadowRoot.getElementById('btn-select-none');
-    if (btnNone) {
-      btnNone.addEventListener('click', () => this._selectAll(false));
+    // Quick action: Select None
+    const selectNoneBtn = this.shadowRoot.getElementById('select-none');
+    if (selectNoneBtn) {
+      selectNoneBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
+          cb.checked = false;
+        });
+        this._updateEntities();
+      });
     }
 
-    // Andere Form-Elemente
+    // Quick action: Select by type
+    this.shadowRoot.querySelectorAll('[data-select-type]').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        const type = btn.dataset.selectType;
+        
+        // Zuerst alle unchecken
+        this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
+          cb.checked = false;
+        });
+        
+        // Dann nur die des Typs checken
+        const group = this.shadowRoot.querySelector(`[data-group-type="${type}"]`);
+        if (group) {
+          group.querySelectorAll('.entity-checkbox').forEach(cb => {
+            cb.checked = true;
+          });
+        }
+        
+        this._updateEntities();
+      });
+    });
+
+    // Other form elements
     this.shadowRoot.querySelectorAll('input:not(.entity-checkbox), select').forEach(el => {
-      el.addEventListener('change', () => this._saveConfig());
+      el.addEventListener('change', () => this._valueChanged());
       if (el.type === 'text') {
-        let t;
+        let timeout;
         el.addEventListener('input', () => {
-          clearTimeout(t);
-          t = setTimeout(() => this._saveConfig(), 300);
+          clearTimeout(timeout);
+          timeout = setTimeout(() => this._valueChanged(), 500);
         });
       }
     });
   }
 
-  _toggleEntity(entityId, checked) {
-    if (!entityId) return;
-    
-    let entities = [...this._entities];
-    const idx = entities.indexOf(entityId);
-    
-    if (checked && idx === -1) {
-      entities.push(entityId);
-    } else if (!checked && idx !== -1) {
-      entities.splice(idx, 1);
-    }
-    
-    this._entities = entities;
-    this._updateCount();
-    this._fireConfigChanged();
-  }
-
-  _selectAll(select) {
-    this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
-      cb.checked = select;
-      const item = cb.closest('.entity-item');
-      if (item) item.classList.toggle('selected', select);
+  _updateEntities() {
+    const selected = [];
+    this.shadowRoot.querySelectorAll('.entity-checkbox:checked').forEach(cb => {
+      selected.push(cb.dataset.entity);
     });
-    
-    if (select) {
-      const all = [];
-      this.shadowRoot.querySelectorAll('.entity-checkbox').forEach(cb => {
-        if (cb.dataset.entity) all.push(cb.dataset.entity);
-      });
-      this._entities = all;
-    } else {
-      this._entities = [];
-    }
-    
-    this._updateCount();
+
+    this._config.entities = selected;
     this._fireConfigChanged();
+    
+    // Update count display
+    const countEl = this.shadowRoot.querySelector('.entity-selection-header .count');
+    if (countEl) {
+      const total = this.shadowRoot.querySelectorAll('.entity-checkbox').length;
+      countEl.textContent = `${selected.length} von ${total} ausgewählt`;
+    }
+
+    // Update group counts
+    this.shadowRoot.querySelectorAll('.entity-group').forEach(group => {
+      const type = group.dataset.groupType;
+      const checkboxes = group.querySelectorAll('.entity-checkbox');
+      const checkedCount = group.querySelectorAll('.entity-checkbox:checked').length;
+      const totalCount = checkboxes.length;
+      
+      const countSpan = group.querySelector('.group-count');
+      if (countSpan) {
+        countSpan.textContent = `(${checkedCount}/${totalCount})`;
+      }
+      
+      // Update button text
+      const btn = group.querySelector('.select-all-btn');
+      if (btn) {
+        btn.textContent = checkedCount === totalCount ? 'Keine' : 'Alle';
+      }
+    });
+
+    // Update item styling
+    this.shadowRoot.querySelectorAll('.entity-item').forEach(item => {
+      const cb = item.querySelector('.entity-checkbox');
+      if (cb && cb.checked) {
+        item.classList.add('selected');
+      } else {
+        item.classList.remove('selected');
+      }
+    });
+
+    // Update summary text
+    const summary = this.shadowRoot.querySelector('details > summary');
+    if (summary && summary.textContent.includes('Assets auswählen')) {
+      const total = this.shadowRoot.querySelectorAll('.entity-checkbox').length;
+      summary.textContent = `📊 Assets auswählen (${selected.length}/${total})`;
+    }
   }
 
-  _updateCount() {
-    const el = this.shadowRoot.getElementById('selected-count');
-    if (!el) return;
-    
-    const total = this.shadowRoot.querySelectorAll('.entity-checkbox').length;
-    const sel = this._entities.length;
-    
-    el.className = 'selected-count' + (sel === 0 ? ' warning' : '');
-    el.textContent = sel === 0 
-      ? '⚠️ Keine Assets ausgewählt'
-      : `✅ ${sel} von ${total} Assets ausgewählt`;
-  }
-
-  _saveConfig() {
-    const get = (id) => {
+  _valueChanged() {
+    const getValue = (id) => {
       const el = this.shadowRoot.getElementById(id);
       if (!el) return undefined;
       if (el.type === 'checkbox') return el.checked;
+      if (el.type === 'number') return parseInt(el.value) || undefined;
       return el.value;
     };
 
-    this._config = {
-      entities: [...this._entities],
-      title: get('title') || '📊 Portfolio',
-      display_mode: get('display_mode') || 'table',
-      show_header: get('show_header'),
-      show_24h_change: get('show_24h_change'),
-      show_7d_change: get('show_7d_change'),
-      show_30d_change: get('show_30d_change'),
-      show_sparkline: get('show_sparkline'),
-      show_market_cap: get('show_market_cap'),
-      show_volume: get('show_volume'),
-      show_signal: get('show_signal'),
-      show_market_status: get('show_market_status'),
-      show_asset_type: get('show_asset_type'),
-      sort_by: get('sort_by') || 'name',
-      sort_order: get('sort_order') || 'asc',
-      group_by: get('group_by') || null,
-      show_top_performers: get('show_top_performers'),
-      show_worst_performers: get('show_worst_performers'),
-      show_total_value: get('show_total_value'),
-      popup_on_click: get('popup_on_click'),
-      max_items: parseInt(get('max_items')) || 50,
+    const newConfig = {
+      ...this._config,
+      title: getValue('title'),
+      display_mode: getValue('display_mode'),
+      show_header: getValue('show_header'),
+      show_24h_change: getValue('show_24h_change'),
+      show_7d_change: getValue('show_7d_change'),
+      show_30d_change: getValue('show_30d_change'),
+      show_sparkline: getValue('show_sparkline'),
+      show_market_cap: getValue('show_market_cap'),
+      show_volume: getValue('show_volume'),
+      show_signal: getValue('show_signal'),
+      show_market_status: getValue('show_market_status'),
+      show_asset_type: getValue('show_asset_type'),
+      sort_by: getValue('sort_by'),
+      sort_order: getValue('sort_order'),
+      group_by: getValue('group_by') || null,
+      show_top_performers: getValue('show_top_performers'),
+      show_worst_performers: getValue('show_worst_performers'),
+      performers_count: parseInt(getValue('performers_count')) || 3,
+      show_total_value: getValue('show_total_value'),
+      show_total_change: getValue('show_total_change'),
+      popup_on_click: getValue('popup_on_click'),
+      max_items: parseInt(getValue('max_items')) || 50,
     };
 
+    this._config = newConfig;
     this._fireConfigChanged();
   }
 
   _fireConfigChanged() {
     this.dispatchEvent(new CustomEvent('config-changed', {
-      detail: { config: { ...this._config } },
+      detail: { config: this._config },
       bubbles: true,
       composed: true,
     }));
@@ -2164,7 +2295,7 @@ class StockTrackerListCardEditor extends HTMLElement {
 if (!customElements.get('stock-tracker-list-card')) {
   customElements.define('stock-tracker-list-card', StockTrackerListCard);
   console.info(
-    '%c 📊 STOCK-TRACKER-LIST-CARD %c v1.0.0 ',
+    '%c 📊 STOCK-TRACKER-LIST-CARD %c v1.0.1 ',
     'color:white;background:#4CAF50;font-weight:bold;padding:2px 6px;border-radius:3px 0 0 3px',
     'color:#4CAF50;background:white;font-weight:bold;padding:2px 6px;border-radius:0 3px 3px 0;border:1px solid #4CAF50'
   );
