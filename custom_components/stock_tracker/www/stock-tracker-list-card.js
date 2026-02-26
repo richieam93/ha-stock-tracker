@@ -1,5 +1,5 @@
 /**
- * Stock Tracker List Card v1.0 for Home Assistant
+ * Stock Tracker List Card v1.1 for Home Assistant
  *
  * A comprehensive list/table view for all your tracked assets.
  *
@@ -36,18 +36,15 @@ class StockTrackerListCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.entities && !config.entity_prefix) {
-      throw new Error('Please define entities or entity_prefix');
-    }
-
     this._config = {
       // Entities
       entities: config.entities || [],
       entity_prefix: config.entity_prefix || null,
+      auto_discover: config.auto_discover !== false, // NEU: Auto-discover wenn keine entities
       
       // Display
       title: config.title || '📊 Portfolio',
-      display_mode: config.display_mode || 'table', // table | compact | heatmap
+      display_mode: config.display_mode || 'table',
       show_header: config.show_header !== false,
       show_sparkline: config.show_sparkline !== false,
       show_market_cap: config.show_market_cap || false,
@@ -62,21 +59,17 @@ class StockTrackerListCard extends HTMLElement {
       // Portfolio
       show_total_value: config.show_total_value || false,
       show_total_change: config.show_total_change || false,
-      holdings: config.holdings || {}, // { "AAPL": 10, "BTC-USD": 0.5 }
+      holdings: config.holdings || {},
       
       // Sorting & Filtering
-      sort_by: config.sort_by || 'name', // name | price | change | market_cap | type
+      sort_by: config.sort_by || 'name',
       sort_order: config.sort_order || 'asc',
-      group_by: config.group_by || null, // null | type | sector
-      filter_type: config.filter_type || null, // null | STOCK | CRYPTO | FOREX | etc.
-      
-      // Performance period
-      performance_period: config.performance_period || '24h', // 24h | 7d | 30d
+      group_by: config.group_by || null,
+      filter_type: config.filter_type || null,
       
       // Appearance
       compact: config.compact || false,
       max_items: config.max_items || 50,
-      columns: config.columns || ['name', 'price', 'change', 'sparkline'],
       
       // Colors
       color_positive: config.color_positive || '#4CAF50',
@@ -85,8 +78,6 @@ class StockTrackerListCard extends HTMLElement {
       
       // Interaction
       popup_on_click: config.popup_on_click !== false,
-      popup_mode: config.popup_mode || 'native', // native | bubble | browser-mod
-      popup_card_config: config.popup_card_config || {},
       
       // Special views
       show_top_performers: config.show_top_performers || false,
@@ -117,28 +108,36 @@ class StockTrackerListCard extends HTMLElement {
 
     let entityIds = [];
 
-    // Get from explicit list
+    // 1. Explicit entity list
     if (this._config.entities && this._config.entities.length > 0) {
-      entityIds = this._config.entities;
+      entityIds = this._config.entities.filter(id => this._hass.states[id]);
     }
-    // Or find by prefix
+    // 2. Find by prefix
     else if (this._config.entity_prefix) {
-      const prefix = this._config.entity_prefix;
+      const prefix = this._config.entity_prefix.toLowerCase();
       entityIds = Object.keys(this._hass.states).filter(id => 
         id.startsWith(`sensor.${prefix}`) && id.endsWith('_price')
       );
     }
-    // Or find all stock tracker entities
-    else {
+    // 3. Auto-discover all stock tracker price sensors
+    else if (this._config.auto_discover) {
       entityIds = Object.keys(this._hass.states).filter(id => {
+        // Nur _price Sensoren
+        if (!id.endsWith('_price')) return false;
         if (!id.startsWith('sensor.')) return false;
+        
         const state = this._hass.states[id];
         const attrs = state?.attributes || {};
-        return attrs.data_source !== undefined || attrs.overall_signal !== undefined;
+        
+        // Muss ein Stock Tracker Sensor sein
+        return (
+          attrs.symbol !== undefined &&
+          attrs.data_source !== undefined
+        );
       });
     }
 
-    return entityIds.filter(id => this._hass.states[id]);
+    return entityIds;
   }
 
   _extractAssetData(entityId) {
@@ -147,28 +146,46 @@ class StockTrackerListCard extends HTMLElement {
 
     const attrs = state.attributes || {};
     const price = parseFloat(state.state) || 0;
+    
+    // Skip wenn kein valider Preis
+    if (price === 0 || isNaN(price)) return null;
+    
     const change = parseFloat(attrs.change) || 0;
     const changePercent = parseFloat(attrs.change_percent) || 0;
-    const weekChange = parseFloat(attrs.week_change_percent) || null;
-    const monthChange = parseFloat(attrs.month_change_percent) || null;
+    const weekChange = attrs.week_change_percent != null ? parseFloat(attrs.week_change_percent) : null;
+    const monthChange = attrs.month_change_percent != null ? parseFloat(attrs.month_change_percent) : null;
 
-    // Get holdings if configured
     const symbol = attrs.symbol || this._extractSymbol(entityId);
     const holdings = this._config.holdings[symbol] || 0;
     const holdingsValue = holdings * price;
 
-    // Determine asset type
+    // Asset Type richtig erkennen
     let assetType = attrs.asset_type || attrs.quote_type || 'STOCK';
+    
+    // Normalisieren
     if (assetType === 'CRYPTOCURRENCY') assetType = 'CRYPTO';
     if (assetType === 'EQUITY') assetType = 'STOCK';
+    
+    // Fallback: Aus Symbol erkennen
+    if (assetType === 'STOCK' || assetType === 'UNKNOWN') {
+      if (symbol.includes('-USD') || symbol.includes('-EUR') || symbol.includes('-GBP')) {
+        // Könnte Crypto sein - prüfe data_source
+        if (attrs.data_source === 'coingecko' || attrs.data_source === 'coinpaprika') {
+          assetType = 'CRYPTO';
+        }
+      }
+      if (symbol.endsWith('=X')) assetType = 'FOREX';
+      if (symbol.endsWith('=F')) assetType = 'COMMODITY';
+      if (symbol.startsWith('^')) assetType = 'INDEX';
+    }
 
-    // Get sparkline data
+    // Sparkline data
     const historyCloses = attrs.history_closes || [];
 
     return {
       entityId,
       symbol,
-      name: attrs.company_name || attrs.friendly_name || symbol,
+      name: attrs.company_name || symbol,
       price,
       currency: attrs.currency || 'USD',
       change,
@@ -188,18 +205,14 @@ class StockTrackerListCard extends HTMLElement {
       dataSource: attrs.data_source || '',
       holdings,
       holdingsValue,
-      sparklineData: historyCloses.slice(-24), // Last 24 data points
+      sparklineData: historyCloses.slice(-24),
       high24h: attrs.today_high,
       low24h: attrs.today_low,
-      week52High: attrs['52_week_high'],
-      week52Low: attrs['52_week_low'],
-      ath: attrs.ath,
-      athChangePercent: attrs.ath_change_percent,
     };
   }
 
   _extractSymbol(entityId) {
-    const match = entityId.match(/sensor\.(.+)_price/);
+    const match = entityId.match(/sensor\.(.+)_price$/);
     if (match) {
       return match[1].toUpperCase().replace(/_/g, '-');
     }
@@ -267,12 +280,10 @@ class StockTrackerListCard extends HTMLElement {
   _filterAssets(assets) {
     let filtered = assets;
 
-    // Filter by type
     if (this._config.filter_type) {
       filtered = filtered.filter(a => a.assetType === this._config.filter_type);
     }
 
-    // Limit items
     if (this._config.max_items) {
       filtered = filtered.slice(0, this._config.max_items);
     }
@@ -295,10 +306,10 @@ class StockTrackerListCard extends HTMLElement {
           groupKey = this._getTypeLabel(asset.assetType);
           break;
         case 'sector':
-          groupKey = asset.sector || 'Other';
+          groupKey = asset.sector || 'Sonstige';
           break;
         default:
-          groupKey = 'All';
+          groupKey = 'Alle';
       }
 
       if (!groups[groupKey]) {
@@ -316,13 +327,11 @@ class StockTrackerListCard extends HTMLElement {
 
   _calculateTotals(assets) {
     let totalValue = 0;
-    let totalCost = 0; // Would need purchase prices
     let totalChange = 0;
 
     for (const asset of assets) {
       if (asset.holdingsValue > 0) {
         totalValue += asset.holdingsValue;
-        // Calculate weighted change
         totalChange += (asset.changePercent / 100) * asset.holdingsValue;
       }
     }
@@ -339,14 +348,14 @@ class StockTrackerListCard extends HTMLElement {
 
   _getTopPerformers(assets, count = 3) {
     return [...assets]
-      .filter(a => a.changePercent !== null)
+      .filter(a => a.changePercent !== null && !isNaN(a.changePercent))
       .sort((a, b) => b.changePercent - a.changePercent)
       .slice(0, count);
   }
 
   _getWorstPerformers(assets, count = 3) {
     return [...assets]
-      .filter(a => a.changePercent !== null)
+      .filter(a => a.changePercent !== null && !isNaN(a.changePercent))
       .sort((a, b) => a.changePercent - b.changePercent)
       .slice(0, count);
   }
@@ -368,7 +377,12 @@ class StockTrackerListCard extends HTMLElement {
     // Extract data for all entities
     let assets = entityIds
       .map(id => this._extractAssetData(id))
-      .filter(a => a !== null);
+      .filter(a => a !== null && a.price > 0);
+
+    if (assets.length === 0) {
+      this._renderEmpty();
+      return;
+    }
 
     // Filter and sort
     assets = this._filterAssets(assets);
@@ -398,7 +412,7 @@ class StockTrackerListCard extends HTMLElement {
           <div class="empty-icon">📊</div>
           <div class="empty-title">Keine Assets gefunden</div>
           <div class="empty-text">
-            Füge Assets über Stock Tracker hinzu oder konfiguriere die Entities in der Karte.
+            Füge Assets über Stock Tracker hinzu oder wähle Entities im Editor aus.
           </div>
         </div>
       </ha-card>
@@ -416,12 +430,12 @@ class StockTrackerListCard extends HTMLElement {
     let tableContent = '';
 
     for (const [groupName, groupAssets] of Object.entries(groups)) {
-      // Group header (if grouping enabled)
       if (cc.group_by) {
+        const groupIcon = this._getGroupIcon(groupName);
         tableContent += `
           <tr class="group-header">
-            <td colspan="10">
-              <span class="group-icon">${this._getTypeIcon(groupName)}</span>
+            <td colspan="20">
+              <span class="group-icon">${groupIcon}</span>
               <span class="group-name">${groupName}</span>
               <span class="group-count">(${groupAssets.length})</span>
             </td>
@@ -429,7 +443,6 @@ class StockTrackerListCard extends HTMLElement {
         `;
       }
 
-      // Asset rows
       for (const asset of groupAssets) {
         tableContent += this._renderTableRow(asset);
       }
@@ -446,7 +459,7 @@ class StockTrackerListCard extends HTMLElement {
           <table class="asset-table">
             <thead>
               <tr>
-                ${cc.show_asset_type ? `<th class="col-type" @click="sort:type">Typ</th>` : ''}
+                ${cc.show_asset_type ? `<th class="col-type">Typ</th>` : ''}
                 <th class="col-name sortable" data-sort="name">
                   Name ${this._getSortIcon('name')}
                 </th>
@@ -523,14 +536,14 @@ class StockTrackerListCard extends HTMLElement {
         ` : ''}
         
         ${cc.show_7d_change ? `
-          <td class="col-change" style="color: ${asset.weekChange >= 0 ? cc.color_positive : cc.color_negative}">
-            ${asset.weekChange !== null ? `${asset.weekChange >= 0 ? '+' : ''}${asset.weekChange.toFixed(2)}%` : '-'}
+          <td class="col-change" style="color: ${asset.weekChange != null && asset.weekChange >= 0 ? cc.color_positive : cc.color_negative}">
+            ${asset.weekChange != null ? `${asset.weekChange >= 0 ? '+' : ''}${asset.weekChange.toFixed(2)}%` : '-'}
           </td>
         ` : ''}
         
         ${cc.show_30d_change ? `
-          <td class="col-change" style="color: ${asset.monthChange >= 0 ? cc.color_positive : cc.color_negative}">
-            ${asset.monthChange !== null ? `${asset.monthChange >= 0 ? '+' : ''}${asset.monthChange.toFixed(2)}%` : '-'}
+          <td class="col-change" style="color: ${asset.monthChange != null && asset.monthChange >= 0 ? cc.color_positive : cc.color_negative}">
+            ${asset.monthChange != null ? `${asset.monthChange >= 0 ? '+' : ''}${asset.monthChange.toFixed(2)}%` : '-'}
           </td>
         ` : ''}
         
@@ -628,8 +641,6 @@ class StockTrackerListCard extends HTMLElement {
 
   _renderHeatmap(assets, totals) {
     const cc = this._config;
-
-    // Calculate size based on market cap or equal
     const maxMcap = Math.max(...assets.map(a => a.marketCap || 1));
 
     const tiles = assets.map(asset => {
@@ -684,15 +695,9 @@ class StockTrackerListCard extends HTMLElement {
         </div>
         <div class="header-right">
           <div class="view-toggle">
-            <button class="view-btn ${cc.display_mode === 'table' ? 'active' : ''}" data-mode="table" title="Tabelle">
-              ☰
-            </button>
-            <button class="view-btn ${cc.display_mode === 'compact' ? 'active' : ''}" data-mode="compact" title="Kompakt">
-              ▦
-            </button>
-            <button class="view-btn ${cc.display_mode === 'heatmap' ? 'active' : ''}" data-mode="heatmap" title="Heatmap">
-              ▩
-            </button>
+            <button class="view-btn ${cc.display_mode === 'table' ? 'active' : ''}" data-mode="table" title="Tabelle">☰</button>
+            <button class="view-btn ${cc.display_mode === 'compact' ? 'active' : ''}" data-mode="compact" title="Kompakt">▦</button>
+            <button class="view-btn ${cc.display_mode === 'heatmap' ? 'active' : ''}" data-mode="heatmap" title="Heatmap">▩</button>
           </div>
         </div>
       </div>
@@ -731,38 +736,43 @@ class StockTrackerListCard extends HTMLElement {
 
     if (cc.show_top_performers) {
       const top = this._getTopPerformers(assets, cc.performers_count);
-      content += `
-        <div class="performers-section">
-          <div class="performers-title">🚀 Top Performer</div>
-          <div class="performers-list">
-            ${top.map(a => `
-              <div class="performer-item positive" data-entity="${a.entityId}">
-                <span class="performer-symbol">${a.symbol}</span>
-                <span class="performer-change">+${a.changePercent.toFixed(2)}%</span>
-              </div>
-            `).join('')}
+      if (top.length > 0) {
+        content += `
+          <div class="performers-section">
+            <div class="performers-title">🚀 Top Performer</div>
+            <div class="performers-list">
+              ${top.map(a => `
+                <div class="performer-item positive" data-entity="${a.entityId}">
+                  <span class="performer-symbol">${a.symbol}</span>
+                  <span class="performer-change">+${a.changePercent.toFixed(2)}%</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      }
     }
 
     if (cc.show_worst_performers) {
       const worst = this._getWorstPerformers(assets, cc.performers_count);
-      content += `
-        <div class="performers-section">
-          <div class="performers-title">📉 Schlechteste</div>
-          <div class="performers-list">
-            ${worst.map(a => `
-              <div class="performer-item negative" data-entity="${a.entityId}">
-                <span class="performer-symbol">${a.symbol}</span>
-                <span class="performer-change">${a.changePercent.toFixed(2)}%</span>
-              </div>
-            `).join('')}
+      if (worst.length > 0) {
+        content += `
+          <div class="performers-section">
+            <div class="performers-title">📉 Schlechteste</div>
+            <div class="performers-list">
+              ${worst.map(a => `
+                <div class="performer-item negative" data-entity="${a.entityId}">
+                  <span class="performer-symbol">${a.symbol}</span>
+                  <span class="performer-change">${a.changePercent.toFixed(2)}%</span>
+                </div>
+              `).join('')}
+            </div>
           </div>
-        </div>
-      `;
+        `;
+      }
     }
 
+    if (!content) return '';
     return `<div class="performers-container">${content}</div>`;
   }
 
@@ -775,12 +785,15 @@ class StockTrackerListCard extends HTMLElement {
     const height = 24;
     const padding = 2;
 
-    const min = Math.min(...data);
-    const max = Math.max(...data);
+    const validData = data.filter(v => v != null && !isNaN(v));
+    if (validData.length < 2) return '<div class="sparkline-empty">-</div>';
+
+    const min = Math.min(...validData);
+    const max = Math.max(...validData);
     const range = max - min || 1;
 
-    const points = data.map((val, i) => {
-      const x = padding + (i / (data.length - 1)) * (width - 2 * padding);
+    const points = validData.map((val, i) => {
+      const x = padding + (i / (validData.length - 1)) * (width - 2 * padding);
       const y = padding + (1 - (val - min) / range) * (height - 2 * padding);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     }).join(' ');
@@ -806,6 +819,7 @@ class StockTrackerListCard extends HTMLElement {
   // =========================================================================
 
   _getBaseStyles() {
+    const cc = this._config;
     return `
       :host {
         display: block;
@@ -815,7 +829,6 @@ class StockTrackerListCard extends HTMLElement {
         overflow: hidden;
       }
 
-      /* Header */
       .card-header {
         display: flex;
         justify-content: space-between;
@@ -851,6 +864,7 @@ class StockTrackerListCard extends HTMLElement {
         cursor: pointer;
         font-size: 14px;
         transition: all 0.2s;
+        color: var(--primary-text-color);
       }
 
       .view-btn:hover {
@@ -863,7 +877,6 @@ class StockTrackerListCard extends HTMLElement {
         border-color: var(--primary-color);
       }
 
-      /* Empty State */
       .empty-state {
         padding: 40px 20px;
         text-align: center;
@@ -886,7 +899,6 @@ class StockTrackerListCard extends HTMLElement {
         color: var(--secondary-text-color);
       }
 
-      /* Totals */
       .totals-bar {
         display: flex;
         justify-content: space-around;
@@ -912,7 +924,6 @@ class StockTrackerListCard extends HTMLElement {
         color: var(--primary-text-color);
       }
 
-      /* Performers */
       .performers-container {
         display: flex;
         gap: 16px;
@@ -949,34 +960,34 @@ class StockTrackerListCard extends HTMLElement {
       }
 
       .performer-item.positive {
-        background: ${this._config.color_positive}15;
+        background: ${cc.color_positive}15;
       }
 
       .performer-item.negative {
-        background: ${this._config.color_negative}15;
+        background: ${cc.color_negative}15;
       }
 
       .performer-item.positive .performer-change {
-        color: ${this._config.color_positive};
+        color: ${cc.color_positive};
       }
 
       .performer-item.negative .performer-change {
-        color: ${this._config.color_negative};
+        color: ${cc.color_negative};
       }
 
       .performer-symbol {
         font-weight: 600;
+        color: var(--primary-text-color);
       }
 
-      /* Type badges */
       .type-badge {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        width: 24px;
-        height: 24px;
+        width: 28px;
+        height: 28px;
         border-radius: 6px;
-        font-size: 12px;
+        font-size: 14px;
       }
 
       .type-badge.type-stock { background: #2196F315; }
@@ -987,41 +998,14 @@ class StockTrackerListCard extends HTMLElement {
       .type-badge.type-bond { background: #79554815; }
       .type-badge.type-etf { background: #00BCD415; }
 
-      /* Signal badges */
       .signal-badge {
-        font-size: 14px;
+        font-size: 16px;
       }
 
-      .signal-badge.signal-strong-buy,
-      .signal-badge.signal-buy {
-        color: ${this._config.color_positive};
-      }
-
-      .signal-badge.signal-strong-sell,
-      .signal-badge.signal-sell {
-        color: ${this._config.color_negative};
-      }
-
-      /* Status badges */
       .status-badge {
-        font-size: 10px;
-        padding: 2px 6px;
-        border-radius: 4px;
+        font-size: 12px;
       }
 
-      .status-badge.status-open {
-        background: ${this._config.color_positive}20;
-        color: ${this._config.color_positive};
-      }
-
-      .status-badge.status-closed,
-      .status-badge.status-after_hours,
-      .status-badge.status-pre_market {
-        background: ${this._config.color_neutral}20;
-        color: ${this._config.color_neutral};
-      }
-
-      /* Sparkline */
       .sparkline {
         display: block;
       }
@@ -1029,6 +1013,7 @@ class StockTrackerListCard extends HTMLElement {
       .sparkline-empty {
         color: var(--secondary-text-color);
         font-size: 12px;
+        text-align: center;
       }
     `;
   }
@@ -1091,6 +1076,7 @@ class StockTrackerListCard extends HTMLElement {
         font-weight: 600;
         font-size: 12px;
         padding: 8px 12px;
+        color: var(--primary-text-color);
       }
 
       .group-icon {
@@ -1120,6 +1106,7 @@ class StockTrackerListCard extends HTMLElement {
 
       .col-price .price {
         font-weight: 600;
+        color: var(--primary-text-color);
       }
 
       .col-change {
@@ -1274,7 +1261,7 @@ class StockTrackerListCard extends HTMLElement {
   _formatPrice(value, currency) {
     if (value === null || value === undefined || isNaN(value)) return '-';
     
-    const decimals = value < 1 ? 4 : value < 100 ? 2 : 2;
+    const decimals = value < 0.01 ? 6 : value < 1 ? 4 : 2;
     const symbols = { USD: '$', EUR: '€', GBP: '£', CHF: 'CHF ', JPY: '¥' };
     const symbol = symbols[currency] || currency + ' ';
     
@@ -1287,6 +1274,7 @@ class StockTrackerListCard extends HTMLElement {
   _formatVolume(value) {
     if (!value) return null;
     value = parseFloat(value);
+    if (isNaN(value)) return null;
     if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
     if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
     if (value >= 1e3) return (value / 1e3).toFixed(1) + 'K';
@@ -1296,6 +1284,7 @@ class StockTrackerListCard extends HTMLElement {
   _formatMarketCap(value) {
     if (!value) return null;
     value = parseFloat(value);
+    if (isNaN(value) || value <= 0) return null;
     if (value >= 1e12) return (value / 1e12).toFixed(2) + 'T';
     if (value >= 1e9) return (value / 1e9).toFixed(2) + 'B';
     if (value >= 1e6) return (value / 1e6).toFixed(2) + 'M';
@@ -1310,6 +1299,7 @@ class StockTrackerListCard extends HTMLElement {
   _getTypeIcon(type) {
     const icons = {
       STOCK: '📈',
+      EQUITY: '📈',
       CRYPTO: '🪙',
       CRYPTOCURRENCY: '🪙',
       FOREX: '💱',
@@ -1324,6 +1314,7 @@ class StockTrackerListCard extends HTMLElement {
   _getTypeLabel(type) {
     const labels = {
       STOCK: 'Aktien',
+      EQUITY: 'Aktien',
       CRYPTO: 'Krypto',
       CRYPTOCURRENCY: 'Krypto',
       FOREX: 'Devisen',
@@ -1333,6 +1324,19 @@ class StockTrackerListCard extends HTMLElement {
       BOND: 'Anleihen',
     };
     return labels[type] || labels[type?.toUpperCase()] || type;
+  }
+
+  _getGroupIcon(groupName) {
+    const icons = {
+      'Aktien': '📈',
+      'Krypto': '🪙',
+      'Devisen': '💱',
+      'Rohstoffe': '🛢️',
+      'Indizes': '📊',
+      'ETFs': '📦',
+      'Anleihen': '📜',
+    };
+    return icons[groupName] || '📋';
   }
 
   _getSignalIcon(signal) {
@@ -1365,13 +1369,11 @@ class StockTrackerListCard extends HTMLElement {
     const intensity = Math.min(Math.abs(changePercent) / 10, 1);
     
     if (changePercent >= 0) {
-      // Green gradient
       const r = Math.round(76 - intensity * 30);
       const g = Math.round(175 - intensity * 50);
       const b = Math.round(80 - intensity * 30);
       return `rgb(${r}, ${g}, ${b})`;
     } else {
-      // Red gradient
       const r = Math.round(244 - intensity * 50);
       const g = Math.round(67 - intensity * 30);
       const b = Math.round(54 - intensity * 20);
@@ -1384,11 +1386,11 @@ class StockTrackerListCard extends HTMLElement {
   // =========================================================================
 
   _attachEventListeners() {
-    // Row clicks (popup)
+    // Row clicks
     this.shadowRoot.querySelectorAll('[data-entity]').forEach(el => {
-      el.addEventListener('click', (e) => {
+      el.addEventListener('click', () => {
         const entityId = el.dataset.entity;
-        if (entityId) {
+        if (entityId && this._config.popup_on_click) {
           this._handleRowClick(entityId);
         }
       });
@@ -1396,14 +1398,14 @@ class StockTrackerListCard extends HTMLElement {
 
     // Sort headers
     this.shadowRoot.querySelectorAll('th.sortable').forEach(th => {
-      th.addEventListener('click', (e) => {
+      th.addEventListener('click', () => {
         const column = th.dataset.sort;
         if (column) {
           if (this._sortColumn === column) {
             this._sortDirection = this._sortDirection === 'asc' ? 'desc' : 'asc';
           } else {
             this._sortColumn = column;
-            this._sortDirection = 'asc';
+            this._sortDirection = column === 'change' ? 'desc' : 'asc';
           }
           this._render();
         }
@@ -1424,8 +1426,6 @@ class StockTrackerListCard extends HTMLElement {
   }
 
   _handleRowClick(entityId) {
-    if (!this._config.popup_on_click) return;
-
     const event = new Event('hass-more-info', {
       bubbles: true,
       composed: true,
@@ -1448,7 +1448,7 @@ class StockTrackerListCard extends HTMLElement {
       display_mode: 'table',
       show_sparkline: true,
       show_24h_change: true,
-      popup_on_click: true,
+      auto_discover: true,
     };
   }
 }
@@ -1484,54 +1484,68 @@ class StockTrackerListCardEditor extends HTMLElement {
     if (!this._hass || !this._hass.states) return [];
 
     const entities = [];
+    const seenSymbols = new Set();
 
     for (const [entityId, state] of Object.entries(this._hass.states)) {
+      // NUR _price Sensoren!
       if (!entityId.startsWith('sensor.')) continue;
       if (!entityId.endsWith('_price')) continue;
 
       const attrs = state.attributes || {};
       
-      // Prüfe ob es ein Stock Tracker Sensor ist
-      const isStockSensor = (
-        attrs.symbol !== undefined ||
-        attrs.data_source !== undefined ||
-        attrs.overall_signal !== undefined ||
-        attrs.change_percent !== undefined
-      );
+      // Muss data_source haben (= Stock Tracker Sensor)
+      if (!attrs.data_source) continue;
+      
+      // Muss einen gültigen Preis haben
+      const price = parseFloat(state.state);
+      if (isNaN(price) || price === 0) continue;
 
-      if (isStockSensor) {
-        const symbol = attrs.symbol || entityId;
-        const name = attrs.company_name || attrs.friendly_name || symbol;
-        const price = state.state;
-        const currency = attrs.currency || 'USD';
-        const assetType = attrs.asset_type || attrs.quote_type || 'STOCK';
-
-        let typeIcon = '📈';
-        if (assetType === 'CRYPTOCURRENCY' || assetType === 'CRYPTO') typeIcon = '🪙';
-        else if (assetType === 'FOREX') typeIcon = '💱';
-        else if (assetType === 'COMMODITY') typeIcon = '🛢️';
-        else if (assetType === 'INDEX') typeIcon = '📊';
-        else if (assetType === 'ETF') typeIcon = '📦';
-        else if (assetType === 'BOND') typeIcon = '📜';
-
-        entities.push({
-          id: entityId,
-          symbol: symbol,
-          name: name,
-          type: assetType,
-          typeIcon: typeIcon,
-          price: price,
-          currency: currency,
-        });
+      const symbol = attrs.symbol || entityId;
+      
+      // Duplikate vermeiden
+      if (seenSymbols.has(symbol)) continue;
+      seenSymbols.add(symbol);
+      
+      const name = attrs.company_name || symbol;
+      const currency = attrs.currency || 'USD';
+      
+      // Asset Type bestimmen
+      let assetType = attrs.asset_type || attrs.quote_type || 'STOCK';
+      if (assetType === 'CRYPTOCURRENCY') assetType = 'CRYPTO';
+      if (assetType === 'EQUITY') assetType = 'STOCK';
+      
+      // Fallback: aus data_source erkennen
+      if (attrs.data_source === 'coingecko' || attrs.data_source === 'coinpaprika') {
+        assetType = 'CRYPTO';
       }
+
+      const typeIcons = {
+        STOCK: '📈',
+        CRYPTO: '🪙',
+        FOREX: '💱',
+        COMMODITY: '🛢️',
+        INDEX: '📊',
+        ETF: '📦',
+        BOND: '📜',
+      };
+
+      entities.push({
+        id: entityId,
+        symbol: symbol,
+        name: name,
+        type: assetType,
+        typeIcon: typeIcons[assetType] || '📈',
+        price: price.toFixed(price < 1 ? 4 : 2),
+        currency: currency,
+      });
     }
 
-    // Sortieren nach Typ und Symbol
+    // Sortieren
+    const typeOrder = { INDEX: 0, STOCK: 1, ETF: 2, CRYPTO: 3, FOREX: 4, COMMODITY: 5, BOND: 6 };
     entities.sort((a, b) => {
-      if (a.type !== b.type) {
-        const typeOrder = { 'INDEX': 0, 'STOCK': 1, 'ETF': 2, 'CRYPTO': 3, 'CRYPTOCURRENCY': 3, 'FOREX': 4, 'COMMODITY': 5, 'BOND': 6 };
-        return (typeOrder[a.type] || 99) - (typeOrder[b.type] || 99);
-      }
+      const orderA = typeOrder[a.type] ?? 99;
+      const orderB = typeOrder[b.type] ?? 99;
+      if (orderA !== orderB) return orderA - orderB;
       return a.symbol.localeCompare(b.symbol);
     });
 
@@ -1548,7 +1562,7 @@ class StockTrackerListCardEditor extends HTMLElement {
     const allEntities = this._getStockEntities();
     const selectedEntities = c.entities || [];
 
-    // Gruppiere Entities nach Typ für bessere Übersicht
+    // Gruppiere nach Typ
     const groupedEntities = {};
     allEntities.forEach(e => {
       const type = e.type || 'OTHER';
@@ -1557,206 +1571,76 @@ class StockTrackerListCardEditor extends HTMLElement {
     });
 
     const typeLabels = {
-      'INDEX': '📊 Indizes',
-      'STOCK': '📈 Aktien',
-      'ETF': '📦 ETFs',
-      'CRYPTO': '🪙 Krypto',
-      'CRYPTOCURRENCY': '🪙 Krypto',
-      'FOREX': '💱 Devisen',
-      'COMMODITY': '🛢️ Rohstoffe',
-      'BOND': '📜 Anleihen',
-      'OTHER': '📋 Sonstige',
+      INDEX: '📊 Indizes',
+      STOCK: '📈 Aktien',
+      ETF: '📦 ETFs',
+      CRYPTO: '🪙 Krypto',
+      FOREX: '💱 Devisen',
+      COMMODITY: '🛢️ Rohstoffe',
+      BOND: '📜 Anleihen',
+      OTHER: '📋 Sonstige',
     };
 
     this.shadowRoot.innerHTML = `
       <style>
-        .editor {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          padding: 16px;
-        }
-        .field {
-          display: flex;
-          flex-direction: column;
-          gap: 6px;
-        }
-        .field label {
-          font-weight: 500;
-          font-size: 14px;
-          color: var(--primary-text-color);
-        }
-        .field .hint {
-          font-size: 11px;
-          color: var(--secondary-text-color);
-        }
-        select, input[type="text"] {
-          padding: 10px 12px;
-          border: 1px solid var(--divider-color, #e0e0e0);
-          border-radius: 8px;
-          background: var(--card-background-color);
-          font-size: 14px;
-          color: var(--primary-text-color);
-        }
-        .checkbox-row {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          padding: 4px 0;
-        }
-        .checkbox-row input[type="checkbox"] {
-          width: 18px;
-          height: 18px;
-          cursor: pointer;
-        }
-        .checkbox-row label {
-          cursor: pointer;
-          user-select: none;
-        }
-        details {
-          border: 1px solid var(--divider-color, #e0e0e0);
-          border-radius: 8px;
-          overflow: hidden;
-        }
-        summary {
-          padding: 12px 14px;
-          font-weight: 600;
-          font-size: 13px;
-          cursor: pointer;
-          background: var(--secondary-background-color);
-          user-select: none;
-        }
-        .group {
-          padding: 12px 14px;
-          display: flex;
-          flex-direction: column;
-          gap: 10px;
-        }
+        .editor { display:flex; flex-direction:column; gap:16px; padding:16px; }
+        .field { display:flex; flex-direction:column; gap:6px; }
+        .field label { font-weight:500; font-size:14px; color:var(--primary-text-color); }
+        .field .hint { font-size:11px; color:var(--secondary-text-color); }
+        select, input[type="text"] { padding:10px 12px; border:1px solid var(--divider-color,#e0e0e0); border-radius:8px; background:var(--card-background-color); font-size:14px; color:var(--primary-text-color); }
+        .checkbox-row { display:flex; align-items:center; gap:10px; padding:4px 0; }
+        .checkbox-row input[type="checkbox"] { width:18px; height:18px; cursor:pointer; }
+        .checkbox-row label { cursor:pointer; user-select:none; }
+        details { border:1px solid var(--divider-color,#e0e0e0); border-radius:8px; overflow:hidden; }
+        summary { padding:12px 14px; font-weight:600; font-size:13px; cursor:pointer; background:var(--secondary-background-color); user-select:none; list-style:none; }
+        summary::-webkit-details-marker { display:none; }
+        .group { padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
         
-        /* Entity Selection */
-        .entity-selection {
-          border: 1px solid var(--divider-color, #e0e0e0);
-          border-radius: 8px;
-          max-height: 300px;
-          overflow-y: auto;
-        }
-        .entity-group {
-          border-bottom: 1px solid var(--divider-color, #e0e0e0);
-        }
-        .entity-group:last-child {
-          border-bottom: none;
-        }
-        .entity-group-header {
-          padding: 8px 12px;
-          background: var(--secondary-background-color);
-          font-weight: 600;
-          font-size: 12px;
-          color: var(--secondary-text-color);
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-        }
-        .select-all-btn {
-          font-size: 11px;
-          padding: 2px 8px;
-          border: 1px solid var(--divider-color);
-          border-radius: 4px;
-          background: var(--card-background-color);
-          cursor: pointer;
-        }
-        .select-all-btn:hover {
-          background: var(--primary-color);
-          color: white;
-          border-color: var(--primary-color);
-        }
-        .entity-item {
-          display: flex;
-          align-items: center;
-          padding: 8px 12px;
-          gap: 10px;
-          border-bottom: 1px solid var(--divider-color, #e0e0e0);
-        }
-        .entity-item:last-child {
-          border-bottom: none;
-        }
-        .entity-item:hover {
-          background: var(--secondary-background-color);
-        }
-        .entity-item input {
-          width: 16px;
-          height: 16px;
-          cursor: pointer;
-        }
-        .entity-item .icon {
-          font-size: 16px;
-        }
-        .entity-item .info {
-          flex: 1;
-          min-width: 0;
-        }
-        .entity-item .symbol {
-          font-weight: 600;
-          font-size: 13px;
-        }
-        .entity-item .name {
-          font-size: 11px;
-          color: var(--secondary-text-color);
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .entity-item .price {
-          font-size: 12px;
-          color: var(--secondary-text-color);
-        }
+        .entity-selection { border:1px solid var(--divider-color,#e0e0e0); border-radius:8px; max-height:350px; overflow-y:auto; }
+        .entity-group { border-bottom:1px solid var(--divider-color,#e0e0e0); }
+        .entity-group:last-child { border-bottom:none; }
+        .entity-group-header { padding:10px 12px; background:var(--secondary-background-color); font-weight:600; font-size:12px; color:var(--secondary-text-color); display:flex; justify-content:space-between; align-items:center; }
+        .select-all-btn { font-size:11px; padding:4px 10px; border:1px solid var(--divider-color); border-radius:4px; background:var(--card-background-color); cursor:pointer; color:var(--primary-text-color); }
+        .select-all-btn:hover { background:var(--primary-color); color:white; border-color:var(--primary-color); }
+        .entity-item { display:flex; align-items:center; padding:10px 12px; gap:10px; border-bottom:1px solid var(--divider-color,#e0e0e0); }
+        .entity-item:last-child { border-bottom:none; }
+        .entity-item:hover { background:var(--secondary-background-color); }
+        .entity-item input { width:18px; height:18px; cursor:pointer; flex-shrink:0; }
+        .entity-item .icon { font-size:18px; }
+        .entity-item .info { flex:1; min-width:0; }
+        .entity-item .symbol { font-weight:600; font-size:13px; color:var(--primary-text-color); }
+        .entity-item .name { font-size:11px; color:var(--secondary-text-color); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .entity-item .price { font-size:12px; color:var(--secondary-text-color); white-space:nowrap; }
         
-        .selected-count {
-          padding: 8px 12px;
-          background: var(--primary-color);
-          color: white;
-          border-radius: 6px;
-          font-size: 13px;
-          text-align: center;
-        }
-        
-        .no-entities {
-          padding: 20px;
-          text-align: center;
-          color: var(--secondary-text-color);
-        }
-        
-        .info-box {
-          background: rgba(33, 150, 243, 0.1);
-          border: 1px solid rgba(33, 150, 243, 0.3);
-          border-radius: 8px;
-          padding: 12px;
-          font-size: 12px;
-        }
+        .selected-count { padding:10px 12px; background:var(--primary-color); color:white; border-radius:6px; font-size:13px; text-align:center; font-weight:500; }
+        .no-entities { padding:30px; text-align:center; color:var(--secondary-text-color); }
+        .info-box { background:rgba(33,150,243,0.1); border:1px solid rgba(33,150,243,0.3); border-radius:8px; padding:12px; font-size:12px; }
       </style>
       
       <div class="editor">
         <!-- ENTITIES AUSWAHL -->
         <details open>
-          <summary>📊 Assets auswählen</summary>
+          <summary>📊 Assets auswählen (${selectedEntities.length}/${allEntities.length})</summary>
           <div class="group">
             ${allEntities.length === 0 ? `
               <div class="no-entities">
+                <p style="font-size:16px">📭</p>
                 <p>Keine Stock Tracker Sensoren gefunden.</p>
-                <p style="font-size:11px">Füge zuerst Assets über Stock Tracker hinzu.</p>
+                <p style="font-size:11px;margin-top:8px">Füge zuerst Assets über Stock Tracker hinzu.</p>
               </div>
             ` : `
               <div class="selected-count">
-                ${selectedEntities.length} von ${allEntities.length} Assets ausgewählt
+                ✅ ${selectedEntities.length} von ${allEntities.length} Assets ausgewählt
               </div>
               <div class="entity-selection">
                 ${Object.entries(groupedEntities).map(([type, entities]) => `
-                  <div class="entity-group">
+                  <div class="entity-group" data-type="${type}">
                     <div class="entity-group-header">
-                      <span>${typeLabels[type] || type}</span>
-                      <button class="select-all-btn" data-type="${type}">Alle</button>
+                      <span>${typeLabels[type] || type} (${entities.length})</span>
+                      <button class="select-all-btn" data-group-type="${type}">Alle</button>
                     </div>
                     ${entities.map(e => `
-                      <div class="entity-item">
+                      <label class="entity-item">
                         <input type="checkbox" 
                                class="entity-checkbox"
                                data-entity="${e.id}" 
@@ -1767,7 +1651,7 @@ class StockTrackerListCardEditor extends HTMLElement {
                           <div class="name">${e.name}</div>
                         </div>
                         <span class="price">${e.price} ${e.currency}</span>
-                      </div>
+                      </label>
                     `).join('')}
                   </div>
                 `).join('')}
@@ -1778,7 +1662,7 @@ class StockTrackerListCardEditor extends HTMLElement {
 
         <!-- TITEL & MODUS -->
         <div class="field">
-          <label>📊 Titel</label>
+          <label>📝 Titel</label>
           <input type="text" id="title" value="${c.title || '📊 Portfolio'}" placeholder="Portfolio">
         </div>
 
@@ -1795,42 +1679,14 @@ class StockTrackerListCardEditor extends HTMLElement {
         <details>
           <summary>👁️ Sichtbare Spalten</summary>
           <div class="group">
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_24h_change" ${c.show_24h_change !== false ? 'checked' : ''}>
-              <label for="show_24h_change">24h Änderung</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_7d_change" ${c.show_7d_change ? 'checked' : ''}>
-              <label for="show_7d_change">7d Änderung</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_30d_change" ${c.show_30d_change ? 'checked' : ''}>
-              <label for="show_30d_change">30d Änderung</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_sparkline" ${c.show_sparkline !== false ? 'checked' : ''}>
-              <label for="show_sparkline">Mini-Chart (Sparkline)</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_market_cap" ${c.show_market_cap ? 'checked' : ''}>
-              <label for="show_market_cap">Marktkapitalisierung</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_volume" ${c.show_volume ? 'checked' : ''}>
-              <label for="show_volume">Volumen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_signal" ${c.show_signal ? 'checked' : ''}>
-              <label for="show_signal">Trading-Signal</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_market_status" ${c.show_market_status ? 'checked' : ''}>
-              <label for="show_market_status">Markt-Status</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_asset_type" ${c.show_asset_type !== false ? 'checked' : ''}>
-              <label for="show_asset_type">Asset-Typ Icon</label>
-            </div>
+            <div class="checkbox-row"><input type="checkbox" id="show_asset_type" ${c.show_asset_type !== false ? 'checked' : ''}><label for="show_asset_type">Asset-Typ Icon</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_24h_change" ${c.show_24h_change !== false ? 'checked' : ''}><label for="show_24h_change">24h Änderung</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_7d_change" ${c.show_7d_change ? 'checked' : ''}><label for="show_7d_change">7d Änderung</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_30d_change" ${c.show_30d_change ? 'checked' : ''}><label for="show_30d_change">30d Änderung</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_sparkline" ${c.show_sparkline !== false ? 'checked' : ''}><label for="show_sparkline">Mini-Chart (Sparkline)</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_market_cap" ${c.show_market_cap ? 'checked' : ''}><label for="show_market_cap">Marktkapitalisierung</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_volume" ${c.show_volume ? 'checked' : ''}><label for="show_volume">Volumen</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_signal" ${c.show_signal ? 'checked' : ''}><label for="show_signal">Trading-Signal</label></div>
           </div>
         </details>
 
@@ -1849,10 +1705,10 @@ class StockTrackerListCardEditor extends HTMLElement {
               </select>
             </div>
             <div class="field">
-              <label>Sortier-Reihenfolge</label>
+              <label>Reihenfolge</label>
               <select id="sort_order">
-                <option value="asc" ${c.sort_order === 'asc' ? 'selected' : ''}>Aufsteigend (A-Z, 0-9)</option>
-                <option value="desc" ${c.sort_order === 'desc' ? 'selected' : ''}>Absteigend (Z-A, 9-0)</option>
+                <option value="asc" ${c.sort_order === 'asc' ? 'selected' : ''}>Aufsteigend</option>
+                <option value="desc" ${c.sort_order === 'desc' ? 'selected' : ''}>Absteigend</option>
               </select>
             </div>
             <div class="field">
@@ -1860,7 +1716,6 @@ class StockTrackerListCardEditor extends HTMLElement {
               <select id="group_by">
                 <option value="" ${!c.group_by ? 'selected' : ''}>Keine Gruppierung</option>
                 <option value="type" ${c.group_by === 'type' ? 'selected' : ''}>Asset-Typ</option>
-                <option value="sector" ${c.group_by === 'sector' ? 'selected' : ''}>Sektor</option>
               </select>
             </div>
           </div>
@@ -1868,22 +1723,15 @@ class StockTrackerListCardEditor extends HTMLElement {
 
         <!-- PERFORMER -->
         <details>
-          <summary>🏆 Performer-Anzeige</summary>
+          <summary>🏆 Top/Worst Performer</summary>
           <div class="group">
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_top_performers" ${c.show_top_performers ? 'checked' : ''}>
-              <label for="show_top_performers">Top Performer anzeigen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_worst_performers" ${c.show_worst_performers ? 'checked' : ''}>
-              <label for="show_worst_performers">Schlechteste Performer anzeigen</label>
-            </div>
+            <div class="checkbox-row"><input type="checkbox" id="show_top_performers" ${c.show_top_performers ? 'checked' : ''}><label for="show_top_performers">Top Performer anzeigen</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_worst_performers" ${c.show_worst_performers ? 'checked' : ''}><label for="show_worst_performers">Worst Performer anzeigen</label></div>
             <div class="field">
-              <label>Anzahl Performer</label>
+              <label>Anzahl</label>
               <select id="performers_count">
-                <option value="3" ${(c.performers_count || 3) === 3 ? 'selected' : ''}>3</option>
-                <option value="5" ${c.performers_count === 5 ? 'selected' : ''}>5</option>
-                <option value="10" ${c.performers_count === 10 ? 'selected' : ''}>10</option>
+                <option value="3" ${(c.performers_count || 3) == 3 ? 'selected' : ''}>3</option>
+                <option value="5" ${c.performers_count == 5 ? 'selected' : ''}>5</option>
               </select>
             </div>
           </div>
@@ -1891,50 +1739,23 @@ class StockTrackerListCardEditor extends HTMLElement {
 
         <!-- PORTFOLIO -->
         <details>
-          <summary>💰 Portfolio-Wert</summary>
+          <summary>💰 Portfolio-Summe</summary>
           <div class="group">
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_total_value" ${c.show_total_value ? 'checked' : ''}>
-              <label for="show_total_value">Portfolio-Gesamtwert anzeigen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_total_change" ${c.show_total_change ? 'checked' : ''}>
-              <label for="show_total_change">Tagesänderung anzeigen</label>
-            </div>
+            <div class="checkbox-row"><input type="checkbox" id="show_total_value" ${c.show_total_value ? 'checked' : ''}><label for="show_total_value">Gesamtwert anzeigen</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="show_total_change" ${c.show_total_change ? 'checked' : ''}><label for="show_total_change">Tagesänderung anzeigen</label></div>
             <div class="info-box">
-              💡 <strong>Holdings konfigurieren:</strong><br><br>
-              Um den Portfolio-Wert zu berechnen, füge Holdings im YAML-Modus hinzu:<br>
-              <code style="font-size:11px">
-              holdings:<br>
-              &nbsp;&nbsp;AAPL: 10<br>
-              &nbsp;&nbsp;BTC-USD: 0.5<br>
-              &nbsp;&nbsp;MSFT: 25
-              </code>
+              💡 Holdings im YAML-Modus konfigurieren:<br>
+              <code>holdings: { "AAPL": 10, "BTC-USD": 0.5 }</code>
             </div>
           </div>
         </details>
 
-        <!-- WEITERE OPTIONEN -->
+        <!-- WEITERE -->
         <details>
           <summary>⚙️ Weitere Optionen</summary>
           <div class="group">
-            <div class="checkbox-row">
-              <input type="checkbox" id="show_header" ${c.show_header !== false ? 'checked' : ''}>
-              <label for="show_header">Header anzeigen</label>
-            </div>
-            <div class="checkbox-row">
-              <input type="checkbox" id="popup_on_click" ${c.popup_on_click !== false ? 'checked' : ''}>
-              <label for="popup_on_click">Popup bei Klick öffnen</label>
-            </div>
-            <div class="field">
-              <label>Maximale Anzahl Assets</label>
-              <select id="max_items">
-                <option value="10" ${c.max_items === 10 ? 'selected' : ''}>10</option>
-                <option value="25" ${c.max_items === 25 ? 'selected' : ''}>25</option>
-                <option value="50" ${(c.max_items || 50) === 50 ? 'selected' : ''}>50</option>
-                <option value="100" ${c.max_items === 100 ? 'selected' : ''}>100</option>
-              </select>
-            </div>
+            <div class="checkbox-row"><input type="checkbox" id="show_header" ${c.show_header !== false ? 'checked' : ''}><label for="show_header">Header anzeigen</label></div>
+            <div class="checkbox-row"><input type="checkbox" id="popup_on_click" ${c.popup_on_click !== false ? 'checked' : ''}><label for="popup_on_click">Popup bei Klick</label></div>
           </div>
         </details>
       </div>
@@ -1953,33 +1774,25 @@ class StockTrackerListCardEditor extends HTMLElement {
     this.shadowRoot.querySelectorAll('.select-all-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        const type = btn.dataset.type;
-        const checkboxes = this.shadowRoot.querySelectorAll(
-          `.entity-group:has([data-type="${type}"]) .entity-checkbox, ` +
-          `.entity-item input[data-entity*="${type.toLowerCase()}"]`
-        );
+        e.stopPropagation();
         
-        // Finde alle Checkboxen in dieser Gruppe
+        const groupType = btn.dataset.groupType;
         const groupDiv = btn.closest('.entity-group');
-        const groupCheckboxes = groupDiv.querySelectorAll('.entity-checkbox');
+        const checkboxes = groupDiv.querySelectorAll('.entity-checkbox');
         
-        // Toggle: Wenn alle gecheckt, alle unchecken, sonst alle checken
-        const allChecked = Array.from(groupCheckboxes).every(cb => cb.checked);
-        groupCheckboxes.forEach(cb => cb.checked = !allChecked);
+        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+        checkboxes.forEach(cb => cb.checked = !allChecked);
         
         this._updateEntities();
       });
     });
 
-    // Other form elements
+    // Other inputs
     this.shadowRoot.querySelectorAll('input:not(.entity-checkbox), select').forEach(el => {
       el.addEventListener('change', () => this._valueChanged());
       if (el.type === 'text') {
-        let timeout;
-        el.addEventListener('input', () => {
-          clearTimeout(timeout);
-          timeout = setTimeout(() => this._valueChanged(), 500);
-        });
+        let t;
+        el.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => this._valueChanged(), 400); });
       }
     });
   }
@@ -1993,11 +1806,17 @@ class StockTrackerListCardEditor extends HTMLElement {
     this._config.entities = selected;
     this._fireConfigChanged();
     
-    // Update count display
+    // Update counter
     const countEl = this.shadowRoot.querySelector('.selected-count');
+    const total = this.shadowRoot.querySelectorAll('.entity-checkbox').length;
     if (countEl) {
-      const total = this.shadowRoot.querySelectorAll('.entity-checkbox').length;
-      countEl.textContent = `${selected.length} von ${total} Assets ausgewählt`;
+      countEl.textContent = `✅ ${selected.length} von ${total} Assets ausgewählt`;
+    }
+    
+    // Update summary
+    const summary = this.shadowRoot.querySelector('details[open] summary');
+    if (summary && summary.textContent.includes('Assets')) {
+      summary.textContent = `📊 Assets auswählen (${selected.length}/${total})`;
     }
   }
 
@@ -2006,15 +1825,15 @@ class StockTrackerListCardEditor extends HTMLElement {
       const el = this.shadowRoot.getElementById(id);
       if (!el) return undefined;
       if (el.type === 'checkbox') return el.checked;
-      if (el.type === 'number') return parseInt(el.value) || undefined;
       return el.value;
     };
 
-    const newConfig = {
+    this._config = {
       ...this._config,
       title: getValue('title'),
       display_mode: getValue('display_mode'),
       show_header: getValue('show_header'),
+      show_asset_type: getValue('show_asset_type'),
       show_24h_change: getValue('show_24h_change'),
       show_7d_change: getValue('show_7d_change'),
       show_30d_change: getValue('show_30d_change'),
@@ -2022,8 +1841,6 @@ class StockTrackerListCardEditor extends HTMLElement {
       show_market_cap: getValue('show_market_cap'),
       show_volume: getValue('show_volume'),
       show_signal: getValue('show_signal'),
-      show_market_status: getValue('show_market_status'),
-      show_asset_type: getValue('show_asset_type'),
       sort_by: getValue('sort_by'),
       sort_order: getValue('sort_order'),
       group_by: getValue('group_by') || null,
@@ -2033,10 +1850,8 @@ class StockTrackerListCardEditor extends HTMLElement {
       show_total_value: getValue('show_total_value'),
       show_total_change: getValue('show_total_change'),
       popup_on_click: getValue('popup_on_click'),
-      max_items: parseInt(getValue('max_items')) || 50,
     };
 
-    this._config = newConfig;
     this._fireConfigChanged();
   }
 
@@ -2049,6 +1864,7 @@ class StockTrackerListCardEditor extends HTMLElement {
   }
 }
 
+
 // =============================================================================
 // REGISTER
 // =============================================================================
@@ -2056,7 +1872,7 @@ class StockTrackerListCardEditor extends HTMLElement {
 if (!customElements.get('stock-tracker-list-card')) {
   customElements.define('stock-tracker-list-card', StockTrackerListCard);
   console.info(
-    '%c 📊 STOCK-TRACKER-LIST-CARD %c v1.0.0 ',
+    '%c 📊 STOCK-TRACKER-LIST-CARD %c v1.1.0 ',
     'color:white;background:#4CAF50;font-weight:bold;padding:2px 6px;border-radius:3px 0 0 3px',
     'color:#4CAF50;background:white;font-weight:bold;padding:2px 6px;border-radius:0 3px 3px 0;border:1px solid #4CAF50'
   );
@@ -2071,7 +1887,7 @@ if (!window.customCards.find(c => c.type === 'stock-tracker-list-card')) {
   window.customCards.push({
     type: 'stock-tracker-list-card',
     name: 'Stock Tracker List Card',
-    description: 'Listenansicht für alle Assets mit Sparklines, Sortierung, Gruppierung und Portfolio-Wert',
+    description: 'Listenansicht für alle Assets mit Sparklines, Sortierung und Portfolio-Wert',
     preview: true,
     documentationURL: 'https://github.com/richieam93/ha-stock-tracker',
   });
