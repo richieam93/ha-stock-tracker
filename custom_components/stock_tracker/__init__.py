@@ -204,6 +204,7 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
     card_files = [
         "stock-tracker-card.js",
         "stock-tracker-list-card.js",
+        "stock-tracker-pro-card.js",
     ]
 
     success = True
@@ -270,6 +271,7 @@ def _copy_custom_card(hass: HomeAssistant) -> bool:
 
 CARD_URL = "/local/community/stock-tracker/stock-tracker-card.js"
 LIST_CARD_URL = "/local/community/stock-tracker/stock-tracker-list-card.js"
+PRO_CARD_URL = "/local/community/stock-tracker/stock-tracker-pro-card.js"
 
 
 async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
@@ -311,6 +313,7 @@ async def _async_register_lovelace_resource(hass: HomeAssistant) -> None:
         card_urls = [
             (CARD_URL, "stock-tracker-card"),
             (LIST_CARD_URL, "stock-tracker-list-card"),
+            (PRO_CARD_URL, "stock-tracker-pro-card"),
         ]
 
         for card_url, card_name in card_urls:
@@ -617,34 +620,23 @@ def _build_dashboard_config(symbols: list[str]) -> dict:
         "entities": indicator_entities,
     })
 
-    # RSI Gauges
-    rsi_cards = []
-    for symbol in symbols[:6]:  # Max 6 Gauges
+    # Analyse-Übersicht mit Pro Card (RSI/MACD/Signals direkt aus Attributen)
+    pro_entities = []
+    for symbol in symbols[:8]:
         sensor_name = clean_symbol(symbol)
-        rsi_cards.append({
-            "type": "gauge",
-            "entity": f"sensor.{sensor_name}_price",
-            "name": f"{symbol} RSI",
-            "needle": True,
-            "min": 0,
-            "max": 100,
-            "segments": [
-                {"from": 0, "color": "#43a047"},
-                {"from": 30, "color": "#ffa600"},
-                {"from": 70, "color": "#db4437"},
-            ],
-        })
+        pro_entities.append(f"sensor.{sensor_name}_price")
 
-    if rsi_cards:
+    if pro_entities:
         analysis_cards.append({
-            "type": "horizontal-stack",
-            "cards": rsi_cards[:3],  # Erste Reihe
+            "type": "custom:stock-tracker-pro-card",
+            "title": "⚡ Markt-Monitor",
+            "entities": pro_entities,
+            "view_mode": "performance",
+            "show_search": True,
+            "show_summary": True,
+            "show_top_bottom": True,
+            "max_items": 8,
         })
-        if len(rsi_cards) > 3:
-            analysis_cards.append({
-                "type": "horizontal-stack",
-                "cards": rsi_cards[3:6],  # Zweite Reihe
-            })
 
     # Volume
     volume_entities = []

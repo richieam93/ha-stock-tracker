@@ -171,6 +171,84 @@ name: Meine Apple Aktie
 | `show_chart` | `true`, `false` | Chart-Bereich anzeigen |
 | `name` | Text | Eigener Name (optional) |
 
+### Neue Pro-Karte (`stock-tracker-pro-card`)
+
+Die Integration bringt zusätzlich eine erweiterte Übersichts-Karte mit:
+
+```yaml
+type: custom:stock-tracker-pro-card
+title: "📈 Markt-Monitor"
+view_mode: performance
+show_search: true
+show_summary: true
+show_top_bottom: true
+max_items: 8
+```
+
+**Optionale Parameter:**
+
+| Parameter | Werte | Beschreibung |
+|-----------|-------|--------------|
+| `title` | Text | Titel der Karte |
+| `view_mode` | `tiles`, `table`, `performance` | Darstellungsmodus |
+| `entities` | Liste | Explizite Preis-Sensoren |
+| `show_search` | `true`, `false` | Suchfeld anzeigen |
+| `show_summary` | `true`, `false` | Kennzahlenleiste anzeigen |
+| `show_top_bottom` | `true`, `false` | Gewinner/Verlierer zeigen |
+| `show_portfolio` | `true`, `false` | Portfolio-Bereich mit Holdings |
+| `holdings` | Objekt | Stückzahlen pro Symbol, z. B. `AAPL: 10` |
+| `max_items` | Zahl | Begrenzung der angezeigten Einträge |
+
+Beispiel mit Portfolio-Werten:
+
+```yaml
+type: custom:stock-tracker-pro-card
+title: "💼 Mein Portfolio"
+view_mode: tiles
+show_portfolio: true
+holdings:
+  AAPL: 10
+  MSFT: 5
+  BTC-USD: 0.25
+```
+
+### Beispiel-Dashboard mit Pro-Karte
+
+```yaml
+type: vertical-stack
+cards:
+  - type: custom:stock-tracker-pro-card
+    title: "📈 Markt-Monitor"
+    view_mode: performance
+    show_search: true
+    show_summary: true
+    show_top_bottom: true
+  - type: custom:stock-tracker-list-card
+    title: "📋 Alle Werte"
+  - type: horizontal-stack
+    cards:
+      - type: custom:stock-tracker-card
+        entity: sensor.aapl_price
+        display_mode: compact
+      - type: custom:stock-tracker-card
+        entity: sensor.msft_price
+        display_mode: compact
+```
+
+### Fehlerbehebung: Blocking-Import Warnung in Home Assistant
+
+Ab Version dieses Fixes wird `yfinance` **lazy** und nur im Executor geladen. Dadurch sollten Warnungen wie diese nicht mehr auftreten:
+
+- `Detected blocking call to open ... inside the event loop`
+- `Detected blocking call to import_module ... inside the event loop`
+
+Falls du die Warnung noch siehst:
+
+1. Integration aktualisieren
+2. Home Assistant komplett neu starten
+3. Browser-Cache für Lovelace leeren
+4. Prüfen, dass wirklich die aktuelle Version unter `custom_components/stock_tracker` liegt
+
 ### Beispiel-Dashboard
 
 ```yaml

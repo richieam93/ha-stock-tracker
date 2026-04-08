@@ -114,20 +114,20 @@ class StockTrackerListCard extends HTMLElement {
     
     for (const [entityId, state] of Object.entries(this._hass.states)) {
       if (!entityId.startsWith('sensor.')) continue;
+      if (!entityId.endsWith('_price')) continue;
       
       const attrs = state.attributes || {};
       
-      // Erkenne Stock Tracker Entities anhand ihrer Attribute
-      const isStockTracker = (
-        attrs.data_source !== undefined ||
-        attrs.change_percent !== undefined ||
-        attrs.overall_signal !== undefined ||
-        (attrs.symbol !== undefined && attrs.currency !== undefined) ||
-        attrs.previous_close !== undefined ||
-        attrs.market_cap !== undefined
+      // Nur Haupt-Preis-Sensoren der Integration aufnehmen
+      const isStockTrackerPrice = (
+        attrs.symbol !== undefined &&
+        attrs.currency !== undefined &&
+        (attrs.previous_close !== undefined ||
+         attrs.data_source !== undefined ||
+         attrs.market_cap !== undefined)
       );
       
-      if (isStockTracker) {
+      if (isStockTrackerPrice) {
         entities.push(entityId);
       }
     }

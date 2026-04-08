@@ -20,8 +20,8 @@ from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import importlib
 import requests
-import yfinance as yf
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import (
@@ -40,6 +40,18 @@ from .const import (
 from .technical import TechnicalAnalysis
 
 _LOGGER = logging.getLogger(__name__)
+
+
+_YFINANCE_MODULE = None
+
+
+def _get_yfinance():
+    """Import yfinance lazily inside executor context."""
+    global _YFINANCE_MODULE
+    if _YFINANCE_MODULE is None:
+        _YFINANCE_MODULE = importlib.import_module("yfinance")
+    return _YFINANCE_MODULE
+
 
 # HTTP Headers
 HEADERS = {
@@ -703,7 +715,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fetch_forex(self, symbol: str) -> dict[str, Any] | None:
         """Fetch forex data from Yahoo Finance."""
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             
             if not info:
@@ -800,7 +812,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fetch_commodity(self, symbol: str) -> dict[str, Any] | None:
         """Fetch commodity data from Yahoo Finance."""
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             
             if not info:
@@ -895,7 +907,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fetch_bond(self, symbol: str) -> dict[str, Any] | None:
         """Fetch bond/treasury data from Yahoo Finance."""
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             
             if not info:
@@ -976,7 +988,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fetch_index(self, symbol: str) -> dict[str, Any] | None:
         """Fetch index data from Yahoo Finance."""
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             
             if not info:
@@ -1303,7 +1315,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _fetch_yahoo(self, symbol: str) -> dict[str, Any] | None:
         """Fetch stock data from Yahoo Finance using yfinance."""
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             
             if not info:
@@ -1666,7 +1678,7 @@ class StockDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         
         # Validate via yfinance
         try:
-            ticker = yf.Ticker(symbol)
+            ticker = _get_yfinance().Ticker(symbol)
             info = ticker.info
             return bool(info and (
                 info.get("regularMarketPrice") is not None
